@@ -4,6 +4,9 @@
     python text_ingestion.py                 # 수집 (캐시가 있으면 재사용)
     python text_ingestion.py --offline       # 네트워크 없이 캐시만으로 재정제
     python text_ingestion.py --refresh       # 기존 결과를 archive로 옮기고 재수집
+    python text_ingestion.py --url https://wikidocs.net/13   # 페이지 하나만
+    python text_ingestion.py --url 13 20 --refresh           # 여러 페이지 다시 받기
+    python text_ingestion.py --url https://wikidocs.net/book/1  # 책 전체
 """
 
 import argparse
@@ -20,12 +23,15 @@ import urllib.request
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
+from urllib.parse import urlparse
 
 from bs4 import BeautifulSoup, NavigableString, Tag
 from dotenv import load_dotenv
 
 BASE_URL = "https://wikidocs.net"
+ALLOWED_HOSTS = ("wikidocs.net", "www.wikidocs.net")
 DATA_ROOT = Path(".data")
+UNBOUND_DIR_NAME = "unbound"  # 책 목차에서 찾지 못한 페이지
 ARCHIVE_DIR = Path("archive")
 
 DEFAULT_USER_AGENT = (
@@ -40,6 +46,8 @@ TIMEOUT_SEC = 15
 NOISE_SELECTORS = ["div.ad-wrapper", "div.toc", "script", "ins", "style", "legend"]
 ZERO_WIDTH = re.compile(r"[\u200B\u200C\u200D\uFEFF]")
 INLINE_WS = re.compile(r"[ \t\r\n]+")
+PAGE_PATH = re.compile(r"^/(\d+)/?$")
+BOOK_PATH = re.compile(r"^/book/(\d+)/?$")
 
 logger = logging.getLogger("text_ingestion")
 
@@ -60,6 +68,8 @@ class TocItem:
 @dataclass
 class PageRecord:
     id: int
+    book_id: int | None
+    book_title: str | None
     parent_id: int | None
     depth: int
     order: int
@@ -79,8 +89,9 @@ class Paths:
     failed_file: Path
 
     @classmethod
-    def for_book(cls, book_id: int) -> "Paths":
-        book_dir = DATA_ROOT / f"book{book_id}"
+    def for_book(cls, book_id: int | None) -> "Paths":
+        name = f"book{book_id}" if book_id is not None else UNBOUND_DIR_NAME
+        book_dir = DATA_ROOT / name
         return cls(
             book_dir=book_dir,
             raw_dir=book_dir / "raw",
@@ -136,7 +147,27 @@ def load_or_fetch(
     return html, True
 
 
+def find_cached_page(page_id: int) -> Path | None:
+    """책을 모르는 상태에서 .data/*/raw/{id}.html 캐시를 찾는다."""
+    return next(DATA_ROOT.glob(f"*/raw/{page_id}.html"), None)
+
+
 # ---------------------------------------------------------------- 파싱
+
+
+def parse_target(value: str) -> tuple[str, int]:
+    """URL 또는 숫자를 ("page" | "book", id)로 해석한다."""
+    value = value.strip()
+    if value.isdigit():
+        return "page", int(value)
+    parsed = urlparse(value)
+    if parsed.scheme not in ("http", "https") or parsed.hostname not in ALLOWED_HOSTS:
+        raise ValueError(f"위키독스 URL이 아님: {value}")
+    if m := PAGE_PATH.match(parsed.path):
+        return "page", int(m.group(1))
+    if m := BOOK_PATH.match(parsed.path):
+        return "book", int(m.group(1))
+    raise ValueError(f"지원하지 않는 경로: {value}")
 
 
 def _to_int(value: str | None) -> int | None:
@@ -144,6 +175,23 @@ def _to_int(value: str | None) -> int | None:
         return int(value) if value else None
     except ValueError:
         return None
+
+
+def parse_book_info(html: str) -> tuple[int | None, str | None]:
+    """목차 영역(#toc-data)에서 책 ID와 제목을 읽는다. 없으면 (None, None)."""
+    soup = BeautifulSoup(html, "html.parser")
+    toc_data = soup.select_one("#toc-data")
+    if toc_data is None:
+        return None, None
+    title_tag = toc_data.select_one('a[href^="/book/"] strong')
+    title = normalize(title_tag.get_text(strip=True)) if title_tag else None
+    return _to_int(toc_data.get("data-book-id")), title
+
+
+def parse_page_title(html: str) -> str | None:
+    soup = BeautifulSoup(html, "html.parser")
+    tag = soup.select_one("h1.page-subject span.page-subject-text")
+    return normalize(tag.get_text(strip=True)) if tag else None
 
 
 def parse_toc(html: str) -> list[TocItem]:
@@ -192,7 +240,7 @@ def extract_body(html: str) -> Tag:
 
 def normalize(text: str) -> str:
     text = unicodedata.normalize("NFC", text)
-    text = text.replace(" ", " ")
+    text = text.replace("\u00a0", " ")
     return ZERO_WIDTH.sub("", text)
 
 
@@ -322,8 +370,18 @@ def clean_text(body: Tag) -> str:
 def archive_path(path: Path) -> Path:
     """archive/ 안에 날짜·시각을 붙인 이동 대상 경로를 만든다."""
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
-    name = f"{path.parent.name}_{path.stem}_{stamp}{path.suffix}"
-    return ARCHIVE_DIR / name
+    try:
+        # .data/book1/raw/13.html -> book1_raw_13_{stamp}.html
+        prefix = "_".join(path.relative_to(DATA_ROOT).parent.parts)
+    except ValueError:
+        prefix = path.parent.name
+    target = ARCHIVE_DIR / f"{prefix}_{path.stem}_{stamp}{path.suffix}"
+    # 같은 초에 여러 번 옮겨도 기존 archive를 덮어쓰지 않도록 번호를 붙인다
+    n = 1
+    while target.exists():
+        target = ARCHIVE_DIR / f"{prefix}_{path.stem}_{stamp}_{n}{path.suffix}"
+        n += 1
+    return target
 
 
 def move_to_archive(path: Path) -> None:
@@ -349,20 +407,43 @@ def load_done_ids(pages_file: Path) -> set[int]:
 
 
 def append_record(pages_file: Path, record: PageRecord) -> None:
+    pages_file.parent.mkdir(parents=True, exist_ok=True)
     with pages_file.open("a", encoding="utf-8") as f:
         f.write(json.dumps(asdict(record), ensure_ascii=False) + "\n")
+
+
+def _record_id(line: str) -> int | None:
+    try:
+        return json.loads(line)["id"]
+    except (json.JSONDecodeError, KeyError):
+        return None
+
+
+def remove_records(pages_file: Path, ids: set[int]) -> None:
+    """기존 파일은 archive로 옮기고, 해당 id를 뺀 나머지로 다시 쓴다."""
+    lines = pages_file.read_text(encoding="utf-8").splitlines(keepends=True)
+    keep = [line for line in lines if _record_id(line) not in ids]
+    move_to_archive(pages_file)
+    pages_file.write_text("".join(keep), encoding="utf-8")
 
 
 # ---------------------------------------------------------------- 실행
 
 
 def make_record(
-    item: TocItem, html: str, cache_file: Path, by_id: dict[int, TocItem]
+    item: TocItem,
+    html: str,
+    cache_file: Path,
+    by_id: dict[int, TocItem],
+    book_id: int | None,
+    book_title: str | None,
 ) -> PageRecord:
     text = clean_text(extract_body(html))
     fetched_at = datetime.fromtimestamp(cache_file.stat().st_mtime)  # noqa: DTZ006
     return PageRecord(
         id=item.id,
+        book_id=book_id,
+        book_title=book_title,
         parent_id=item.parent_id,
         depth=item.depth,
         order=item.order,
@@ -399,6 +480,7 @@ def run(
     if not toc:
         raise ValueError("목차 항목을 찾지 못함")
     by_id = {item.id: item for item in toc}
+    _, book_title = parse_book_info(toc_html)
     done = load_done_ids(paths.pages_file)
     targets = [item for item in toc if item.id not in done][:limit]
     logger.info(
@@ -414,7 +496,7 @@ def run(
             html, used_network = load_or_fetch(
                 f"{BASE_URL}/{item.id}", cache_file, headers, offline
             )
-            record = make_record(item, html, cache_file, by_id)
+            record = make_record(item, html, cache_file, by_id, book_id, book_title)
         except FetchBlockedError as e:
             logger.error("차단 응답으로 중단: %s", e)
             failed[item.id] = str(e)
@@ -449,6 +531,96 @@ def run(
         logger.warning("실패 %d건 -> %s", len(failed), paths.failed_file)
 
 
+def ingest_page(
+    page_id: int, headers: dict[str, str], offline: bool, refresh: bool
+) -> bool:
+    """책 정보 없이 페이지 하나를 처리한다. 네트워크를 썼으면 True."""
+    cached = find_cached_page(page_id)
+    if cached and refresh and not offline:
+        move_to_archive(cached)
+        cached = None
+    if cached:
+        html, used_network = cached.read_text(encoding="utf-8"), False
+    elif offline:
+        raise FileNotFoundError(f"캐시 없음 (offline): {page_id}")
+    else:
+        html, used_network = fetch_html(f"{BASE_URL}/{page_id}", headers), True
+
+    # 본문 페이지에 책 ID와 책 전체 목차가 함께 들어 있다
+    book_id, book_title = parse_book_info(html)
+    by_id = {item.id: item for item in parse_toc(html)}
+    item = by_id.get(page_id)
+    if item is None:
+        logger.warning("%s: 책 목차에서 찾지 못해 %s로 저장", page_id, UNBOUND_DIR_NAME)
+        book_id, book_title = None, None
+        title = parse_page_title(html) or str(page_id)
+        item = TocItem(id=page_id, parent_id=None, depth=0, order=-1, title=title)
+
+    paths = Paths.for_book(book_id)
+    cache_file = paths.raw_dir / f"{page_id}.html"
+    if used_network:
+        cache_file.parent.mkdir(parents=True, exist_ok=True)
+        cache_file.write_text(html, encoding="utf-8")
+    elif cached != cache_file:
+        cache_file = cached  # 다른 위치의 캐시를 그대로 사용
+
+    already_done = page_id in load_done_ids(paths.pages_file)
+    if already_done and not refresh:
+        logger.info("%s: 이미 수집됨, 건너뜀 (--refresh로 교체)", page_id)
+        return used_network
+    record = make_record(item, html, cache_file, by_id, book_id, book_title)
+    if already_done:
+        remove_records(paths.pages_file, {page_id})
+    append_record(paths.pages_file, record)
+    logger.info(
+        "%s %s -> %s (%d자)",
+        page_id,
+        " > ".join(record.breadcrumb),
+        paths.pages_file,
+        len(record.text),
+    )
+    return used_network
+
+
+def run_targets(
+    values: list[str],
+    delay: float,
+    user_agent: str,
+    offline: bool,
+    refresh: bool,
+    limit: int | None,
+) -> None:
+    """--url로 받은 페이지·책 URL(또는 페이지 번호)을 순서대로 처리한다."""
+    headers = build_headers(user_agent)
+    used_network = False
+    for value in values:
+        try:
+            kind, target_id = parse_target(value)
+        except ValueError as e:
+            logger.error("%s", e)
+            continue
+        if kind == "book":
+            run(target_id, delay, user_agent, offline, refresh, limit)
+            used_network = not offline
+            continue
+        if used_network:
+            time.sleep(delay)
+        try:
+            used_network = ingest_page(target_id, headers, offline, refresh)
+        except FetchBlockedError as e:
+            logger.error("차단 응답으로 중단: %s", e)
+            break
+        except (
+            urllib.error.URLError,
+            TimeoutError,
+            UnicodeDecodeError,
+            FileNotFoundError,
+            ValueError,
+        ) as e:
+            logger.warning("%s 실패: %s", value, e)
+            used_network = False
+
+
 def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="위키독스 책 텍스트 수집·정제")
@@ -464,15 +636,27 @@ def main() -> None:
         "--refresh", action="store_true", help="기존 결과를 archive로 옮기고 다시 생성"
     )
     parser.add_argument("--limit", type=int, default=None, help="처리할 최대 페이지 수")
+    parser.add_argument(
+        "--url",
+        nargs="+",
+        metavar="URL",
+        help="페이지/책 URL 또는 페이지 번호 (지정하면 --book-id 무시)",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
+    user_agent = os.getenv("WIKIDOCS_USER_AGENT", DEFAULT_USER_AGENT)
+    if args.url:
+        run_targets(
+            args.url, args.delay, user_agent, args.offline, args.refresh, args.limit
+        )
+        return
     run(
         book_id=args.book_id,
         delay=args.delay,
-        user_agent=os.getenv("WIKIDOCS_USER_AGENT", DEFAULT_USER_AGENT),
+        user_agent=user_agent,
         offline=args.offline,
         refresh=args.refresh,
         limit=args.limit,
