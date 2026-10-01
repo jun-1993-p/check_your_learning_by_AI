@@ -30,9 +30,11 @@ from dotenv import load_dotenv
 
 BASE_URL = "https://wikidocs.net"
 ALLOWED_HOSTS = ("wikidocs.net", "www.wikidocs.net")
-DATA_ROOT = Path(".data")
+# 실행 위치와 상관없이 프로젝트 루트 기준으로 저장한다
+PROJECT_ROOT = Path(__file__).resolve().parent
+DATA_ROOT = PROJECT_ROOT / ".data"
 UNBOUND_DIR_NAME = "unbound"  # 책 목차에서 찾지 못한 페이지
-ARCHIVE_DIR = Path("archive")
+ARCHIVE_DIR = PROJECT_ROOT / "archive"
 
 DEFAULT_USER_AGENT = (
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -372,14 +374,15 @@ def archive_path(path: Path) -> Path:
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")  # noqa: DTZ005
     try:
         # .data/book1/raw/13.html -> book1_raw_13_{stamp}.html
-        prefix = "_".join(path.relative_to(DATA_ROOT).parent.parts)
+        parts = path.relative_to(DATA_ROOT).parent.parts
     except ValueError:
-        prefix = path.parent.name
-    target = ARCHIVE_DIR / f"{prefix}_{path.stem}_{stamp}{path.suffix}"
+        parts = (path.parent.name,)
+    base = "_".join([*parts, path.stem])
+    target = ARCHIVE_DIR / f"{base}_{stamp}{path.suffix}"
     # 같은 초에 여러 번 옮겨도 기존 archive를 덮어쓰지 않도록 번호를 붙인다
     n = 1
     while target.exists():
-        target = ARCHIVE_DIR / f"{prefix}_{path.stem}_{stamp}_{n}{path.suffix}"
+        target = ARCHIVE_DIR / f"{base}_{stamp}_{n}{path.suffix}"
         n += 1
     return target
 

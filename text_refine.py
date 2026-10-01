@@ -334,10 +334,12 @@ def refine_book(book_dir: Path, min_chars: int, max_chars: int) -> None:
         except (OSError, UnicodeDecodeError, ValueError) as e:
             logger.warning("정제 실패 %s: %s", page["id"], e)
 
+    content = "".join(json.dumps(c, ensure_ascii=False) + "\n" for c in all_chunks)
+    if chunks_file.exists() and chunks_file.read_text(encoding="utf-8") == content:
+        logger.info("%s: 변경 없음 (조각 %d개)", book_dir.name, len(all_chunks))
+        return
     move_to_archive(chunks_file)
-    with chunks_file.open("w", encoding="utf-8") as f:
-        for chunk in all_chunks:
-            f.write(json.dumps(chunk, ensure_ascii=False) + "\n")
+    chunks_file.write_text(content, encoding="utf-8")
     logger.info(
         "%s: 조각 %d개 (제외 페이지 %d개) -> %s",
         book_dir.name,
