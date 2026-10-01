@@ -216,3 +216,14 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# other
+.vscode/
+.idea_folder/
+
+# claude
+.claude/
+CLAUDE.md
+
+# crawled data
+.data/
