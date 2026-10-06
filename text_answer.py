@@ -2,6 +2,7 @@
 
 검색(text_embed.search) → 조각 본문 조립 → Groq LLM 답변 → 퀴즈 생성 순서로 동작한다.
 답변과 퀴즈는 검색된 조각에만 근거하며, 출처 번호와 URL을 함께 보여 준다.
+퀴즈 유형별 스키마·검증·채점은 quiz_templates.py에 있다.
 
 .env:
     GROQ_API_KEY=...
@@ -10,7 +11,8 @@
 사용 예:
     python text_answer.py "문자열 공백 제거는 어떻게 해?"
     python text_answer.py "리스트 슬라이싱" --book-id 1 --k 4
-    python text_answer.py "딕셔너리" --quiz 5 --solve   # 퀴즈를 터미널에서 직접 풀기
+    python text_answer.py "딕셔너리" --quiz 6 --solve        # 퀴즈를 터미널에서 직접 풀기
+    python text_answer.py "문자열 공백 제거" --formats ox,blank --quiz 4
     python text_answer.py "튜플" --no-quiz
 """
 
@@ -20,16 +22,20 @@ import logging
 import os
 import random
 import re
+from collections import Counter
 from dataclasses import dataclass
 
 from dotenv import load_dotenv
 
+import quiz_templates as qt
 from text_embed import DATA_ROOT, get_collection, load_chunks, load_model, search
 
 DEFAULT_MODEL = "qwen/qwen3.8-27b"
 ANSWER_TEMPERATURE = 0.2
 QUIZ_TEMPERATURE = 0.5
-QUIZ_EXTRA = 2  # 겹치지 않는 문제를 고를 수 있도록 후보를 더 만든다
+# Groq 무료 등급은 분당 출력 토큰이 1,000개라, 요청마다 상한을 명시해야 거절되지 않는다
+ANSWER_MAX_TOKENS = 700
+QUIZ_MAX_TOKENS = 900
 MAX_SOURCE_CHARS = 4000  # 조각 하나가 컨텍스트를 독차지하지 않도록 자른다
 # 관련 없는 조각이 근거로 섞이지 않도록 거르는 기준 (코사인 거리, 작을수록 가깝다)
 MAX_DISTANCE = 0.5  # 이보다 먼 조각은 버린다
@@ -37,8 +43,6 @@ DISTANCE_MARGIN = 0.06  # 1위보다 이만큼 이상 먼 조각은 버린다
 THINK_TAG = re.compile(r"<think>.*?</think>", re.DOTALL)
 JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 CITATION = re.compile(r"\[(\d+)\]")
-# 해설이 보기 번호를 가리키면 섞었을 때 틀린 해설이 된다
-CHOICE_REFERENCE = re.compile(r"(선택지|보기)\s*\d|\d\s*번(?!째)")
 
 logger = logging.getLogger("text_answer")
 
@@ -48,35 +52,23 @@ ANSWER_SYSTEM = """너는 프로그래밍 학습을 돕는 튜터야.
 - 자료에 답이 없으면 추측하지 말고 "제공된 자료에서 찾을 수 없어요."라고만 답해.
 - 필요하면 자료의 코드 예시를 짧게 인용해."""
 
-SKILLS = ("개념 이해", "결과 예측", "함수 선택", "오류 찾기")
-
 QUIZ_SYSTEM = """너는 학습 직후 기억을 확인하는 퀴즈 출제자야.
-- [자료]에 있는 내용만으로 풀 수 있는 문제를 만들어. 자료 밖 지식은 쓰지 마.
-- 문제마다 묻는 개념(concept)과 유형(skill)을 다르게 해.
-  같은 유형에서 함수 이름이나 값만 바꾼 비슷한 문제는 만들지 마.
+- 학습자는 방금 [튜터 답변]을 읽었어. 문제는 그 답변에서 다룬 내용에서만 내.
+  [자료]에 있어도 답변에서 다루지 않은 내용(같은 절의 다른 함수 등)은 묻지 마.
+- [자료]는 정답의 근거를 확인하는 데 써. 자료 밖 지식은 쓰지 마.
+- 문제마다 묻는 개념(concept)을 다르게 하고, 값만 바꾼 비슷한 문제는 만들지 마.
 - skill은 다음 중 하나:
-  "개념 이해": 동작 원리나 차이를 바르게 설명한 것 고르기
-  "결과 예측": 코드 실행 결과 맞히기
-  "함수 선택": 주어진 상황에 맞는 함수·문법 고르기
-  "오류 찾기": 틀린 설명, 잘못된 코드, 오류가 나는 경우 찾기
+  "개념 이해": 동작 원리나 차이를 이해했는지
+  "결과 예측": 코드 실행 결과를 맞히는지
+  "함수 선택": 상황에 맞는 함수·문법을 고르는지
+  "오류 찾기": 틀린 설명, 잘못된 코드, 오류가 나는 경우를 찾는지
 - concept는 묻는 대상을 짧게 (예: "lstrip", "문자열 슬라이싱").
-- 객관식(mcq)은 서로 다른 보기 4개, 정답 1개.
-  오답은 학습자가 실제로 헷갈리는 것으로 만들어:
-  비슷한 함수와의 혼동, 방향·범위 착각, 흔한 오해.
-  말이 안 되는 보기, 정답만 유난히 길거나 자세한 보기는 금지.
-- 보기나 정답이 문자열 값이면 'hi '처럼 따옴표로 감싸서 앞뒤 공백이 보이게 써.
-- 단답형(short)은 한 단어나 한 줄 코드로 답할 수 있게 만들어.
-- 해설에는 정답의 근거와, 가장 헷갈리는 오답이 왜 틀렸는지를 함께 써.
-  보기 순서는 나중에 섞이므로 해설에서 "1번", "선택지 2" 같은 번호를 쓰지 말고
-  보기 내용으로 가리켜.
-- 출력은 아래 형식의 JSON 객체 하나만. 다른 텍스트는 쓰지 마.
-{"questions": [
-  {"type": "mcq", "skill": "결과 예측", "concept": "...", "question": "...",
-   "choices": ["...", "...", "...", "..."], "answer_index": 0,
-   "explanation": "...", "source": 1},
-  {"type": "short", "skill": "함수 선택", "concept": "...", "question": "...",
-   "answer": "...", "explanation": "...", "source": 2}
-]}"""
+- source는 근거가 된 자료 번호.
+- 문자열 값은 'hi '처럼 따옴표로 감싸서 앞뒤 공백이 보이게 써.
+- 문제에 코드가 필요하면 code에 >>> 형식으로 쓰고, 필요 없으면 빈 문자열로 둬.
+- 해설은 짧게 핵심만.
+유형별 규칙:
+{formats}"""
 
 
 @dataclass
@@ -233,15 +225,34 @@ def get_client():
     return Groq(api_key=api_key)
 
 
-def chat(client, messages: list[dict], temperature: float) -> str:
+def chat(
+    client,
+    messages: list[dict],
+    temperature: float,
+    max_tokens: int,
+    schema: dict | None = None,
+) -> str:
+    """LLM 호출은 모두 여기를 거친다. 로컬 모델로 바꿀 때 이 함수만 교체하면 된다."""
+    options = {}
+    if schema is not None:
+        # strict가 아니면 Groq는 생성을 제한하지 않고 생성 후 검사만 해서,
+        # 모델이 스키마를 무시하면 400(json_validate_failed)으로 통째로 거절된다
+        options["response_format"] = {
+            "type": "json_schema",
+            "json_schema": {"name": "quiz", "schema": schema, "strict": True},
+        }
     response = client.chat.completions.create(
         model=os.getenv("GROQ_MODEL", DEFAULT_MODEL),
         messages=messages,
         temperature=temperature,
+        max_tokens=max_tokens,
+        **options,
     )
-    content = response.choices[0].message.content or ""
+    choice = response.choices[0]
+    if choice.finish_reason == "length":
+        logger.warning("출력이 max_tokens(%d)에서 잘렸습니다", max_tokens)
     # 추론 모델이 생각 과정을 본문에 섞어 내보내는 경우를 걸러낸다
-    return THINK_TAG.sub("", content).strip()
+    return THINK_TAG.sub("", choice.message.content or "").strip()
 
 
 def answer(client, question: str, sources: list[Source]) -> str:
@@ -252,7 +263,7 @@ def answer(client, question: str, sources: list[Source]) -> str:
             "content": f"[자료]\n{format_sources(sources)}\n\n[질문]\n{question}",
         },
     ]
-    return chat(client, messages, ANSWER_TEMPERATURE)
+    return chat(client, messages, ANSWER_TEMPERATURE, ANSWER_MAX_TOKENS)
 
 
 def cited_sources(answer_text: str, sources: list[Source]) -> list[Source]:
@@ -261,23 +272,12 @@ def cited_sources(answer_text: str, sources: list[Source]) -> list[Source]:
     return [s for s in sources if s.no in cited]
 
 
-def quiz_problem(q: dict) -> str | None:
-    """문제 형식의 결함. 정상이면 None."""
-    if q.get("type") != "mcq":
-        return None if q.get("answer") else "정답 없음"
-    choices = q.get("choices")
-    idx = q.get("answer_index")
-    if not isinstance(choices, list) or len(choices) < 2:
-        return "보기 부족"
-    # 공백 문제처럼 앞뒤 공백만 다른 보기가 정상이므로 원문 그대로 비교한다
-    if len(set(map(str, choices))) != len(choices):
-        return "중복 보기"
-    if not isinstance(idx, int) or not 0 <= idx < len(choices):
-        return f"answer_index 범위 밖 ({idx})"
-    return None
+# ---------------------------------------------------------------- 퀴즈
 
 
-def parse_quiz(text: str, source_nos: set[int]) -> list[dict]:
+def parse_llm_quiz(
+    text: str, counts: dict[str, int], source_nos: set[int]
+) -> dict[str, list[dict]]:
     match = JSON_OBJECT.search(text)
     if not match:
         raise QuizFormatError("JSON 객체를 찾지 못함")
@@ -286,107 +286,169 @@ def parse_quiz(text: str, source_nos: set[int]) -> list[dict]:
     except json.JSONDecodeError as e:
         raise QuizFormatError(f"JSON 파싱 실패: {e}") from e
 
-    questions = []
-    for q in data.get("questions", []):
-        if not isinstance(q, dict) or not q.get("question"):
-            continue
-        if q.get("type") != "mcq":
-            q["type"] = "short"
-        problem = quiz_problem(q)
-        if problem:
-            logger.warning("문제 제외 (%s): %s", problem, q["question"])
-            continue
-        if q.get("source") not in source_nos:
-            q["source"] = None
-        if q.get("skill") not in SKILLS:
-            q["skill"] = ""
-        # 개념이 비면 문제마다 다른 것으로 취급한다
-        q["concept"] = str(q.get("concept") or q["question"]).strip().lower()
-        questions.append(q)
-    if not questions:
-        raise QuizFormatError("유효한 문제가 없음")
-    return questions
-
-
-def shuffle_choices(q: dict, rng: random.Random) -> None:
-    """모델은 정답을 앞쪽 보기에 두는 경향이 있어 순서를 섞는다.
-
-    해설이 보기 번호를 가리키면 섞는 순간 해설이 틀리므로 그대로 둔다.
-    """
-    if CHOICE_REFERENCE.search(str(q.get("explanation", ""))):
-        logger.info("해설이 보기 번호를 언급해 순서를 유지: %s", q["question"])
-        return
-    answer = q["choices"][q["answer_index"]]
-    rng.shuffle(q["choices"])
-    q["answer_index"] = q["choices"].index(answer)
-
-
-def select_diverse(questions: list[dict], n: int) -> list[dict]:
-    """유형과 개념이 겹치지 않는 문제부터 고르고, 모자라면 조건을 완화한다.
-
-    같은 유형 반복이 더 단조롭게 느껴지므로 개념보다 유형 다양성을 먼저 지킨다.
-    """
-    picked: list[dict] = []
-    skills: set[str] = set()
-    concepts: set[str] = set()
-    rules = [
-        lambda q: q["skill"] not in skills and q["concept"] not in concepts,
-        lambda q: q["skill"] not in skills,
-        lambda q: q["concept"] not in concepts,
-        lambda q: True,
-    ]
-    for rule in rules:
-        for q in questions:
-            if len(picked) == n:
-                return picked
-            if any(q is p for p in picked) or not rule(q):
+    result: dict[str, list[dict]] = {}
+    for fmt, n in counts.items():
+        items = data.get(fmt) if isinstance(data.get(fmt), list) else []
+        kept = []
+        for q in items:
+            if not isinstance(q, dict):
                 continue
-            picked.append(q)
-            skills.add(q["skill"])
-            concepts.add(q["concept"])
-    return picked
+            problem = qt.validate(fmt, q)
+            if problem:
+                label = q.get("question") or q.get("statement")
+                logger.warning("문제 제외 (%s, %s): %s", fmt, problem, label)
+                continue
+            kept.append(qt.normalize(fmt, q, source_nos))
+        if len(kept) < n:
+            logger.warning("%s: 요청 %d개 중 %d개만 유효", fmt, n, len(kept))
+        result[fmt] = kept[:n]
+    if not any(result.values()):
+        raise QuizFormatError("유효한 문제가 없음")
+    return result
+
+
+def failed_generation(error, limit: int = 400) -> str:
+    """Groq가 스키마 검사에서 거절한 모델 출력의 앞부분. 실패 원인 파악용."""
+    body = getattr(error, "body", None)
+    detail = body.get("error", body) if isinstance(body, dict) else {}
+    text = str(detail.get("failed_generation", "")) if isinstance(detail, dict) else ""
+    text = text.replace("\n", "⏎")
+    return (text[:limit] + "…") if len(text) > limit else (text or "(없음)")
+
+
+def llm_quiz(
+    client,
+    question: str,
+    sources: list[Source],
+    counts: dict[str, int],
+    retries: int = 1,
+    avoid_concepts: list[str] | None = None,
+    answer_text: str = "",
+) -> dict[str, list[dict]]:
+    """avoid_concepts: 다른 유형(빈칸)에서 이미 출제한 개념. 같은 것을 다시 묻지 않게 한다.
+    answer_text: 학습자가 방금 읽은 답변. 출제 범위를 이 내용으로 좁힌다.
+    """
+    request = "이 답변 내용을 확인하는 퀴즈를 만들어."
+    if avoid_concepts:
+        # "묻지 마"만 쓰면 주제 자체를 피해 무관한 내용으로 넘어간다
+        request += (
+            f" {', '.join(avoid_concepts)}은(는) 이미 다른 문제로 출제했으니, "
+            "같은 주제 안에서 다른 개념이나 개념 사이의 차이를 물어."
+        )
+    messages = [
+        {
+            "role": "system",
+            "content": QUIZ_SYSTEM.format(formats=qt.format_instructions(counts)),
+        },
+        {
+            "role": "user",
+            "content": (
+                f"[자료]\n{format_sources(sources)}\n\n"
+                f"[학습자가 방금 공부한 질문]\n{question}\n\n"
+                f"[튜터 답변]\n{answer_text or '(없음)'}\n\n{request}"
+            ),
+        },
+    ]
+    from groq import BadRequestError
+
+    schema = qt.build_schema(counts)
+    for attempt in range(retries + 1):
+        try:
+            text = chat(client, messages, QUIZ_TEMPERATURE, QUIZ_MAX_TOKENS, schema)
+            return parse_llm_quiz(text, counts, {s.no for s in sources})
+        except QuizFormatError as e:
+            logger.warning("퀴즈 형식 오류 (%d회차): %s", attempt + 1, e)
+        except BadRequestError as e:
+            # 모델 출력이 스키마 검사에 걸린 경우만 재시도한다. 그 밖의 400은 그대로 올린다
+            if "json_validate_failed" not in str(e):
+                raise
+            logger.warning(
+                "퀴즈 스키마 검사 실패 (%d회차), 다시 요청. 거절된 출력: %s",
+                attempt + 1,
+                failed_generation(e),
+            )
+    raise QuizFormatError("퀴즈 생성 실패")
 
 
 def make_quiz(
     client,
     question: str,
     sources: list[Source],
-    n: int,
-    retries: int = 1,
+    index: dict[str, dict],
+    counts: dict[str, int],
     rng: random.Random | None = None,
+    focus: str = "",
 ) -> list[dict]:
-    messages = [
-        {"role": "system", "content": QUIZ_SYSTEM},
-        {
-            "role": "user",
-            "content": (
-                f"[자료]\n{format_sources(sources)}\n\n"
-                f"[학습자가 방금 공부한 질문]\n{question}\n\n"
-                f"이 내용을 확인하는 후보 문제를 {n + QUIZ_EXTRA}개 만들어. "
-                "객관식과 단답형을 섞고, 가능한 한 서로 다른 skill을 써."
-            ),
-        },
-    ]
+    """유형별로 문제를 만들어 --formats 순서대로 돌려준다.
+
+    focus(답변 본문)는 빈칸 문제를 학습 주제와 관련된 예제부터 고르고,
+    LLM 유형의 출제 범위를 좁히는 데 쓴다.
+    """
     rng = rng or random.Random()
-    for attempt in range(retries + 1):
-        text = chat(client, messages, QUIZ_TEMPERATURE)
-        try:
-            candidates = parse_quiz(text, {s.no for s in sources})
-        except QuizFormatError as e:
-            logger.warning("퀴즈 형식 오류 (%d회차): %s", attempt + 1, e)
-            continue
-        picked = select_diverse(candidates, n)
-        logger.info(
-            "퀴즈 후보 %d개 중 %d개 선택: %s",
-            len(candidates),
-            len(picked),
-            [f"{q['skill'] or '-'}/{q['concept']}" for q in picked],
+    by_format: dict[str, list[dict]] = {}
+
+    if counts.get("blank"):
+        chunks = [(s.no, index[s.chunk_id]) for s in sources]
+        exclude = qt.defined_names(index.values())
+        by_format["blank"] = qt.pick_blanks(
+            chunks, counts["blank"], rng, focus, exclude
         )
-        for q in picked:
-            if q["type"] == "mcq":
-                shuffle_choices(q, rng)
-        return picked
-    raise QuizFormatError("퀴즈 생성 실패")
+        if len(by_format["blank"]) < counts["blank"]:
+            logger.warning(
+                "빈칸 재료 부족: 요청 %d개 중 %d개 (근거 조각에 쓸 만한 코드 예제가 적음)",
+                counts["blank"],
+                len(by_format["blank"]),
+            )
+
+    # 빈칸을 먼저 정해 두고, 그 개념을 LLM 유형에서 피하게 한다
+    llm_counts = {f: n for f, n in counts.items() if f in qt.LLM_FORMATS}
+    if llm_counts:
+        blank_concepts = [q["concept"] for q in by_format.get("blank", [])]
+        by_format.update(
+            llm_quiz(
+                client,
+                question,
+                sources,
+                llm_counts,
+                avoid_concepts=blank_concepts,
+                answer_text=focus,
+            )
+        )
+        # 한 유형이 통째로 빠지면(보기 중복 등) 그 유형만 한 번 더 요청한다.
+        # 분당 토큰 한도 때문에 대기가 생길 수 있어 재요청은 한 번만 한다
+        missing = {f: n for f, n in llm_counts.items() if not by_format.get(f)}
+        if missing:
+            logger.info("빠진 유형 다시 요청: %s", list(missing))
+            done = list(
+                dict.fromkeys(q["concept"] for qs in by_format.values() for q in qs)
+            )
+            try:
+                by_format.update(
+                    llm_quiz(
+                        client,
+                        question,
+                        sources,
+                        missing,
+                        retries=0,
+                        avoid_concepts=done,
+                        answer_text=focus,
+                    )
+                )
+            except QuizFormatError as e:
+                logger.warning("재요청 실패, 빠진 유형 없이 진행: %s", e)
+    for q in by_format.get("mcq", []):
+        qt.shuffle_mcq(q, rng)
+
+    quiz = [q for fmt in counts for q in by_format.get(fmt, [])]
+    repeated = [c for c, n in Counter(q["concept"] for q in quiz).items() if n > 1]
+    if repeated:
+        logger.warning("여러 문제가 같은 개념을 묻습니다: %s", repeated)
+    logger.info(
+        "퀴즈 %d문제: %s",
+        len(quiz),
+        [f"{q['format']}/{q['skill'] or '-'}/{q['concept']}" for q in quiz],
+    )
+    return quiz
 
 
 # ---------------------------------------------------------------- 출력·풀이
@@ -394,36 +456,38 @@ def make_quiz(
 
 def print_quiz(questions: list[dict], sources: list[Source], solve: bool) -> None:
     by_no = {s.no: s for s in sources}
-    correct = 0
+    auto_total = auto_correct = 0
     for i, q in enumerate(questions, start=1):
-        tag = f"[{q['skill']}] " if q["skill"] else ""
-        print(f"\nQ{i}. {tag}{q['question']}")
-        if q["type"] == "mcq":
-            for n, choice in enumerate(q["choices"], start=1):
-                print(f"   {n}) {choice}")
-            answer_text = f"{q['answer_index'] + 1}) {q['choices'][q['answer_index']]}"
-        else:
-            answer_text = q["answer"]
+        print(f"\nQ{i}. {qt.render_question(q)}")
 
         if solve:
             reply = input("   답: ").strip()
             # 메타인지 점검: 정답을 보기 전에 스스로 확신도를 매긴다
-            confidence = input("   확신도 (1 모름 / 2 애매 / 3 확실): ").strip()
-            if q["type"] == "mcq":
-                ok = reply == str(q["answer_index"] + 1)
-                correct += ok
-                print(f"   → {'정답' if ok else '오답'} (확신도 {confidence or '-'})")
+            confidence = input("   확신도 (1 모름 / 2 애매 / 3 확실): ").strip() or "-"
+            result = qt.grade(q, reply)
+            if result is None:
+                print(f"   → 확신도 {confidence}, 아래 정답과 비교해 보세요")
             else:
-                print(f"   → 확신도 {confidence or '-'}, 아래 정답과 비교해 보세요")
+                auto_total += 1
+                auto_correct += result
+                print(f"   → {'정답' if result else '오답'} (확신도 {confidence})")
 
-        print(f"   정답: {answer_text}")
-        print(f"   해설: {q.get('explanation', '')}")
+        print(qt.indent(qt.render_answer(q)))
         if q.get("source"):
             print(f"   근거: [{q['source']}] {by_no[q['source']].url}")
 
-    n_mcq = sum(q["type"] == "mcq" for q in questions)
-    if solve and n_mcq:
-        print(f"\n객관식 {n_mcq}문제 중 {correct}문제 정답")
+    if solve and auto_total:
+        print(f"\n자동 채점 {auto_total}문제 중 {auto_correct}문제 정답")
+
+
+def parse_formats(value: str) -> list[str]:
+    formats = list(dict.fromkeys(f.strip() for f in value.split(",") if f.strip()))
+    unknown = [f for f in formats if f not in qt.FORMATS]
+    if unknown or not formats:
+        raise argparse.ArgumentTypeError(
+            f"알 수 없는 유형 {unknown}. 사용 가능: {','.join(qt.FORMATS)}"
+        )
+    return formats
 
 
 def main() -> None:
@@ -438,7 +502,15 @@ def main() -> None:
     parser.add_argument(
         "--margin", type=float, default=DISTANCE_MARGIN, help="1위 대비 허용 거리 차"
     )
-    parser.add_argument("--quiz", type=int, default=3, help="퀴즈 문제 수")
+    parser.add_argument(
+        "--formats",
+        type=parse_formats,
+        default=list(qt.FORMATS),
+        help=f"퀴즈 유형 (쉼표로 구분, 기본: {','.join(qt.FORMATS)})",
+    )
+    parser.add_argument(
+        "--quiz", type=int, default=4, help="총 문제 수 (유형별로 나눔)"
+    )
     parser.add_argument("--no-quiz", action="store_true")
     parser.add_argument("--solve", action="store_true", help="퀴즈를 직접 풀기")
     args = parser.parse_args()
@@ -479,7 +551,10 @@ def main() -> None:
                 print("\n답변에 인용된 자료가 없어 퀴즈를 건너뜁니다.")
                 return
             print("\n=== 확인 퀴즈 ===")
-            questions = make_quiz(client, args.question, quiz_sources, args.quiz)
+            counts = qt.split_counts(args.formats, args.quiz)
+            questions = make_quiz(
+                client, args.question, quiz_sources, index, counts, focus=answer_text
+            )
             print_quiz(questions, quiz_sources, args.solve)
     except APIConnectionError as e:
         logger.error("Groq 연결 실패: %s", e)
