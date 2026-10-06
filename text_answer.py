@@ -231,9 +231,15 @@ def chat(
     temperature: float,
     max_tokens: int,
     schema: dict | None = None,
+    model: str | None = None,
+    **extra,
 ) -> str:
-    """LLM 호출은 모두 여기를 거친다. 로컬 모델로 바꿀 때 이 함수만 교체하면 된다."""
-    options = {}
+    """LLM 호출은 모두 여기를 거친다. 로컬 모델로 바꿀 때 이 함수만 교체하면 된다.
+
+    model을 주지 않으면 .env의 GROQ_MODEL(없으면 기본값)을 쓴다.
+    extra는 모델별 옵션(예: 추론 모델의 reasoning_effort)으로 그대로 넘긴다.
+    """
+    options = dict(extra)
     if schema is not None:
         # strict가 아니면 Groq는 생성을 제한하지 않고 생성 후 검사만 해서,
         # 모델이 스키마를 무시하면 400(json_validate_failed)으로 통째로 거절된다
@@ -242,7 +248,7 @@ def chat(
             "json_schema": {"name": "quiz", "schema": schema, "strict": True},
         }
     response = client.chat.completions.create(
-        model=os.getenv("GROQ_MODEL", DEFAULT_MODEL),
+        model=model or os.getenv("GROQ_MODEL", DEFAULT_MODEL),
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
