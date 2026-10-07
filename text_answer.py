@@ -1,7 +1,7 @@
-"""임베딩한 개념 조각을 근거로 질문에 답하고, 확인 퀴즈를 만든다.
+"""임베딩한 개념 문단(A+)을 근거로 질문에 답하고, 확인 퀴즈를 만든다.
 
-검색(text_embed.search) → 조각 본문 조립 → Groq LLM 답변 → 퀴즈 생성 순서로 동작한다.
-답변과 퀴즈는 검색된 조각에만 근거하며, 출처 번호와 URL을 함께 보여 준다.
+검색(paragraphs.ParagraphIndex) → 문단 본문 조립 → Groq LLM 답변 → 퀴즈 생성 순서로 동작한다.
+답변과 퀴즈는 검색된 문단에만 근거하며, 출처 번호와 URL을 함께 보여 준다.
 퀴즈 유형별 스키마·검증·채점은 quiz_templates.py에 있다.
 
 .env:
@@ -28,14 +28,8 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 import quiz_templates as qt
-from text_embed import (
-    DATA_ROOT,
-    child_ranges,
-    get_collection,
-    load_chunks,
-    load_model,
-    search,
-)
+from paragraphs import ParagraphIndex, get_collection
+from text_embed import load_chunk_index, load_model
 
 DEFAULT_MODEL = "qwen/qwen3.8-27b"
 ANSWER_TEMPERATURE = 0.2
@@ -43,10 +37,10 @@ QUIZ_TEMPERATURE = 0.5
 # Groq 무료 등급은 분당 출력 토큰이 1,000개라, 요청마다 상한을 명시해야 거절되지 않는다
 ANSWER_MAX_TOKENS = 700
 QUIZ_MAX_TOKENS = 900
-MAX_SOURCE_CHARS = 4000  # 조각 하나가 컨텍스트를 독차지하지 않도록 자른다
-# 관련 없는 조각이 근거로 섞이지 않도록 거르는 기준 (코사인 거리, 작을수록 가깝다)
-MAX_DISTANCE = 0.5  # 이보다 먼 조각은 버린다
-DISTANCE_MARGIN = 0.06  # 1위보다 이만큼 이상 먼 조각은 버린다
+# 관련 없는 문단이 근거로 섞이지 않도록 거르는 기준 (코사인 거리, 작을수록 가깝다).
+# 문단 거리는 0.3~0.6에 퍼져 있어 처음 값으로 잡았다. 테스트 결과를 보고 조정한다
+MAX_DISTANCE = 0.6  # 이보다 먼 문단은 버린다
+DISTANCE_MARGIN = 0.15  # 1위보다 이만큼 이상 먼 문단은 버린다
 THINK_TAG = re.compile(r"<think>.*?</think>", re.DOTALL)
 JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 CITATION = re.compile(r"\[(\d+)\]")
@@ -80,14 +74,16 @@ QUIZ_SYSTEM = """너는 학습 직후 기억을 확인하는 퀴즈 출제자야
 
 @dataclass
 class Source:
-    """LLM에 넘기는 근거 하나. no는 프롬프트 안의 [n] 번호."""
+    """LLM에 넘기는 근거 하나(A+ 문단). no는 프롬프트 안의 [n] 번호."""
 
     no: int
     chunk_id: str
-    path: str  # 매칭된 위치까지의 경로 (소제목 매칭이면 그 소제목으로 끝난다)
+    path: str  # 페이지 경로 > 소제목
     url: str
     distance: float
     text: str
+    block_start: int  # 조각 안에서 이 문단이 차지하는 블록 범위
+    block_end: int
 
 
 class QuizFormatError(Exception):
@@ -97,144 +93,48 @@ class QuizFormatError(Exception):
 # ---------------------------------------------------------------- 근거 조립
 
 
-def render_block(block: dict) -> str:
-    """임베딩용과 달리 코드·오류 출력까지 그대로 살린다."""
-    kind = block["type"]
-    if kind in ("code", "code_example"):
-        lang = block.get("lang") or ""
-        text = f"```{lang}\n{block['code']}\n```"
-        if block.get("error"):
-            text += f"\n(오류 출력)\n{block['error']}"
-        return text
-    if kind == "table":
-        rows = [block["header"], *block["rows"]] if block["header"] else block["rows"]
-        return "\n".join(" | ".join(row) for row in rows)
-    if kind == "concept_box":
-        inner = "\n".join(render_block(b) for b in block["blocks"])
-        return f"<{block['title']}>\n{inner}"
-    if kind == "heading":
-        return f"{'#' * block['level']} {block['text']}"
-    if kind == "list":
-        return f"- {block['text']}"
-    return block.get("text", "")
-
-
-def load_chunk_index() -> dict[str, dict]:
-    index: dict[str, dict] = {}
-    for chunks_file in sorted(DATA_ROOT.glob("*/chunks.jsonl")):
-        for chunk in load_chunks(chunks_file):
-            if chunk["chunk_id"] in index:
-                logger.warning("chunk_id 중복: %s (%s)", chunk["chunk_id"], chunks_file)
-            index[chunk["chunk_id"]] = chunk
-    return index
-
-
-def locate_section(chunk: dict, hit: dict) -> tuple[str, str]:
-    """매칭된 위치의 (경로, URL). 소제목 벡터로 매칭됐으면 그 소제목을 가리킨다.
-
-    조각 path는 [책 경로, 첫 h2, 첫 h3]라서, 소제목 매칭일 때는
-    책 경로 뒤를 그 소제목(h3면 실제로 속한 h2 포함)으로 바꾼다.
-    """
-    if hit["matched"] != "child":
-        return hit["path"], hit["source_url"]
-    headings = [b for b in chunk["blocks"] if b["type"] == "heading"]
-    target = next(
-        (
-            n
-            for n, b in enumerate(headings)
-            if b["level"] in (2, 3) and b["text"] == hit["heading"]
-        ),
-        None,
-    )
-    if target is None:
-        return hit["path"], hit["source_url"]
-
-    # path 끝의 제목들(최대 h2·h3 두 개)을 떼어 책 경로만 남긴다.
-    # 조각 블록에 h3가 있어도 path에는 없을 수 있어서, 블록 구조로 추측하지 않는다
-    breadcrumb = list(chunk.get("path", []))
-    texts = {b["text"] for b in headings}
-    for _ in range(2):
-        if breadcrumb and breadcrumb[-1] in texts:
-            breadcrumb.pop()
-    tail = [headings[target]["text"]]
-    if headings[target]["level"] == 3:
-        parent = next((b for b in reversed(headings[:target]) if b["level"] == 2), None)
-        if parent:
-            tail.insert(0, parent["text"])
-    section_path = " > ".join([*breadcrumb, *tail])
-
-    anchor = headings[target].get("anchor")
-    base = chunk["source_url"].split("#")[0]
-    return section_path, f"{base}#{anchor}" if anchor else hit["source_url"]
-
-
-def render_blocks(blocks: list[dict]) -> str:
-    return "\n".join(t for b in blocks if (t := render_block(b).strip()))
-
-
-def source_body(chunk: dict, hit: dict) -> str:
-    """조각 본문. 너무 길면 검색에 걸린 부분(part) 또는 소제목 구간의 블록만 쓴다."""
-    blocks = chunk["blocks"]
-    body = render_blocks(blocks)
-    if len(body) <= MAX_SOURCE_CHARS:
-        return body
-    if hit.get("block_start") is not None:
-        body = render_blocks(blocks[hit["block_start"] : hit["block_end"]])
-    elif hit["matched"] == "child":
-        span = next(
-            ((s, e) for h, s, e in child_ranges(blocks) if h == hit["heading"]), None
-        )
-        if span:
-            body = render_blocks(blocks[span[0] : span[1]])
-    if len(body) > MAX_SOURCE_CHARS:
-        body = body[:MAX_SOURCE_CHARS] + "\n...(생략)"
-    return body
-
-
 def filter_hits(hits: list[dict], max_distance: float, margin: float) -> list[dict]:
+    """거리순으로 정렬된 문단에서 너무 먼 것을 뺀다."""
     if not hits:
         return []
     cutoff = min(max_distance, hits[0]["distance"] + margin)
     kept = [h for h in hits if h["distance"] <= cutoff]
-    dropped = [f"{h['chunk_id']}({h['distance']:.3f})" for h in hits[len(kept) :]]
+    dropped = [
+        f"{h['unit_id']}({h['distance']:.3f})" for h in hits[len(kept) : len(kept) + 5]
+    ]
     if dropped:
-        logger.info("거리 기준 %.3f 초과로 제외: %s", cutoff, ", ".join(dropped))
+        logger.info("거리 기준 %.3f 초과로 제외: %s ...", cutoff, ", ".join(dropped))
     return kept
+
+
+def section_path(unit: dict) -> str:
+    """ "페이지 경로 > 소제목". 소제목이 페이지 제목을 대신한 문단은 경로만 쓴다."""
+    path = " > ".join(unit["path"])
+    return path if unit["fallback"] else f"{path} > {unit['section']}"
 
 
 def retrieve(
     question: str,
     k: int,
     book_id: int | None,
-    model,
-    collection,
-    index: dict,
+    index: ParagraphIndex,
     max_distance: float = MAX_DISTANCE,
     margin: float = DISTANCE_MARGIN,
 ) -> list[Source]:
-    hits = search(question, k, book_id, None, model=model, collection=collection)
-    hits = filter_hits(hits, max_distance, margin)  # search는 거리순으로 돌려준다
-    sources = []
-    for hit in hits:
-        chunk = index.get(hit["chunk_id"])
-        if chunk is None:
-            logger.warning(
-                "chunks.jsonl에 없는 조각: %s (--rebuild 필요)", hit["chunk_id"]
-            )
-            continue
-        body = source_body(chunk, hit)
-        path, url = locate_section(chunk, hit)
-        sources.append(
-            Source(
-                no=len(sources) + 1,
-                chunk_id=hit["chunk_id"],
-                path=path,
-                url=url,
-                distance=hit["distance"],
-                text=body,
-            )
+    hits = filter_hits(index.find(question, book_id), max_distance, margin)[:k]
+    return [
+        Source(
+            no=no,
+            chunk_id=h["chunk_id"],
+            path=section_path(h),
+            url=h["url"],
+            distance=h["distance"],
+            text=h["text"],
+            block_start=h["block_start"],
+            block_end=h["block_end"],
         )
-    return sources
+        for no, h in enumerate(hits, start=1)
+    ]
 
 
 def format_sources(sources: list[Source]) -> str:
@@ -404,6 +304,18 @@ def llm_quiz(
     raise QuizFormatError("퀴즈 생성 실패")
 
 
+def source_chunks(
+    sources: list[Source], index: dict[str, dict]
+) -> list[tuple[int, dict]]:
+    """빈칸 문제 재료: 근거 문단이 차지하는 블록만 담은 조각 (문단 밖 코드는 쓰지 않는다)."""
+    result = []
+    for s in sources:
+        chunk = index[s.chunk_id]
+        blocks = chunk["blocks"][s.block_start : s.block_end]
+        result.append((s.no, {**chunk, "blocks": blocks}))
+    return result
+
+
 def make_quiz(
     client,
     question: str,
@@ -422,14 +334,13 @@ def make_quiz(
     by_format: dict[str, list[dict]] = {}
 
     if counts.get("blank"):
-        chunks = [(s.no, index[s.chunk_id]) for s in sources]
         exclude = qt.defined_names(index.values())
         by_format["blank"] = qt.pick_blanks(
-            chunks, counts["blank"], rng, focus, exclude
+            source_chunks(sources, index), counts["blank"], rng, focus, exclude
         )
         if len(by_format["blank"]) < counts["blank"]:
             logger.warning(
-                "빈칸 재료 부족: 요청 %d개 중 %d개 (근거 조각에 쓸 만한 코드 예제가 적음)",
+                "빈칸 재료 부족: 요청 %d개 중 %d개 (근거 문단에 쓸 만한 코드 예제가 적음)",
                 counts["blank"],
                 len(by_format["blank"]),
             )
@@ -528,7 +439,7 @@ def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(description="RAG 기반 답변 + 확인 퀴즈 (Groq)")
     parser.add_argument("question")
-    parser.add_argument("--k", type=int, default=5, help="근거 후보 조각 수 (최대)")
+    parser.add_argument("--k", type=int, default=5, help="근거 후보 문단 수 (최대)")
     parser.add_argument("--book-id", type=int, default=None, help="검색할 책 제한")
     parser.add_argument(
         "--max-distance", type=float, default=MAX_DISTANCE, help="근거 거리 상한"
@@ -560,9 +471,7 @@ def main() -> None:
         args.question,
         args.k,
         args.book_id,
-        load_model(),
-        get_collection(),
-        index,
+        ParagraphIndex(load_model(), get_collection(), index),
         args.max_distance,
         args.margin,
     )

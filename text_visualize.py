@@ -1,4 +1,4 @@
-"""Chroma에 저장한 임베딩 벡터를 눈으로 확인한다.
+"""Chroma에 저장한 문단 임베딩 벡터를 눈으로 확인한다.
 
 하위 명령:
     show        벡터 숫자 값·길이·통계를 출력하고, 원하면 CSV로 저장
@@ -7,16 +7,16 @@
     map         전체 벡터를 2D·3D로 줄인 산점도 (plotly가 있으면 HTML, 없으면 2D PNG)
 
 show/heatmap/similarity의 대상 고르기 (하나만 지정, 없으면 --book-id·--limit 범위):
-    --query "질문"   검색 상위 조각 + 질의 벡터 (질의는 맨 위 행)
-    --page-id 13     한 페이지의 조각들
-    --ids 13-17#chunk 13-17#c07
+    --query "질문"   검색 상위 문단 + 질의 벡터 (질의는 맨 위 행)
+    --page-id 13     한 페이지의 문단들
+    --ids 13-17#g001 13-17#g002
 
 사용 예:
-    python text_visualize.py show --ids 13-17#chunk 13-17#c07 --n 10
+    python text_visualize.py show --ids 13-17#g001 13-17#g002 --n 10
     python text_visualize.py show --page-id 13 --csv .data/inspect/page13.csv
     python text_visualize.py heatmap --query "문자열 공백 제거" --open
     python text_visualize.py heatmap --page-id 13 --sort-dims --dims 64
-    python text_visualize.py similarity --page-id 13 --kind all --open
+    python text_visualize.py similarity --page-id 13 --open
     python text_visualize.py map --book-id 1 --query "슬라이싱" --open
     python text_visualize.py map --dim 3 --color book --query "이동평균" --open
 """
@@ -28,7 +28,8 @@ from pathlib import Path
 
 import numpy as np
 
-from text_embed import DATA_ROOT, embed, get_collection, load_model, search
+from paragraphs import ParagraphIndex, get_collection
+from text_embed import DATA_ROOT, embed, load_model
 
 OUT_DIR = DATA_ROOT / "inspect"
 SNIPPET_CHARS = 160
@@ -50,22 +51,21 @@ def build_where(**conditions) -> dict | None:
     return filters[0] if len(filters) == 1 else {"$and": filters}
 
 
-def fetch(collection, book_id: int | None, kind: str) -> dict:
-    where = build_where(book_id=book_id, kind=None if kind == "all" else kind)
+def fetch(collection, book_id: int | None) -> dict:
+    where = build_where(book_id=book_id)
     return collection.get(where=where, include=["embeddings", "metadatas", "documents"])
 
 
 def sort_key(item: tuple) -> tuple:
-    """페이지 → 조각 순번 → 조각 벡터 먼저 → 소제목 순서로 문서 흐름대로 놓는다."""
+    """페이지 → 조각 순번 → 문단 순서로 문서 흐름대로 놓는다."""
     vid, _, meta = item
     _, _, seq = meta["chunk_id"].partition("-")
     seq_no = int(seq) if seq.isdigit() else 0
-    return (meta.get("page_id", 0), seq_no, meta["kind"] != "chunk", vid)
+    return (meta.get("page_id", 0), seq_no, vid)
 
 
 def select_vectors(args, collection) -> tuple[list[str], np.ndarray, list[dict]]:
     """show/heatmap/similarity 대상. 질의가 있으면 질의 벡터를 맨 앞에 붙인다."""
-    kind = None if args.kind == "all" else args.kind
     include = ["embeddings", "metadatas"]
     order: list[str] | None = None
 
@@ -74,21 +74,17 @@ def select_vectors(args, collection) -> tuple[list[str], np.ndarray, list[dict]]
         order = args.ids
     elif args.query:
         model = load_model()
-        hits = search(args.query, args.limit, args.book_id, None, model, collection)
-        order = [h["chunk_id"] for h in hits]  # 검색 순위대로 놓는다
+        hits = ParagraphIndex(model, collection).find(args.query, args.book_id)
+        order = [h["unit_id"] for h in hits[: args.limit]]  # 검색 순위대로 놓는다
         logger.info("검색 결과: %s", order)
-        got = collection.get(
-            where=build_where(chunk_id={"$in": order}, kind=kind), include=include
-        )
+        got = collection.get(ids=order, include=include)
     else:
-        where = build_where(book_id=args.book_id, page_id=args.page_id, kind=kind)
+        where = build_where(book_id=args.book_id, page_id=args.page_id)
         got = collection.get(where=where, limit=args.limit, include=include)
 
     items = list(zip(got["ids"], got["embeddings"], got["metadatas"]))
-    if args.ids:
+    if args.ids or args.query:
         items.sort(key=lambda it: order.index(it[0]))
-    elif args.query:
-        items.sort(key=lambda it: (order.index(it[2]["chunk_id"]), sort_key(it)))
     else:
         items.sort(key=sort_key)
     if not items:
@@ -99,18 +95,16 @@ def select_vectors(args, collection) -> tuple[list[str], np.ndarray, list[dict]]
     metas = [it[2] for it in items]
     if args.query:
         ids.insert(0, "질의")
-        metas.insert(0, {"chunk_id": "질의", "kind": "query", "heading": args.query})
+        metas.insert(0, {"unit_id": "질의", "kind": "query", "section": args.query})
         vectors = np.vstack([np.asarray(embed(model, [args.query])), vectors])
     return ids, vectors, metas
 
 
 def row_label(meta: dict) -> str:
-    if meta["kind"] == "query":
-        text = f"★ 질의: {meta['heading']}"
-    elif meta["kind"] == "chunk":
-        text = f"■ {meta['chunk_id']} {meta.get('path', '').split(' > ')[-1]}"
+    if meta.get("kind") == "query":
+        text = f"★ 질의: {meta['section']}"
     else:
-        text = f"└ {meta['chunk_id']} {meta.get('heading', '')}"
+        text = f"■ {meta['unit_id']} {meta.get('section', '')}"
     return text if len(text) <= LABEL_CHARS else text[: LABEL_CHARS - 1] + "…"
 
 
@@ -269,8 +263,6 @@ def reduce(vectors: np.ndarray, method: str, dim: int = 2) -> np.ndarray:
 
 
 def color_label(meta: dict, color: str) -> str:
-    if color == "kind":
-        return meta.get("kind", "")
     if color == "book":
         return meta.get("source_dir", str(meta.get("book_id", "")))
     chapter = meta.get("path", "").split(" > ")[0]
@@ -306,36 +298,26 @@ def build_figure(points, metas, docs, color, query_points, queries, hit_ids):
                 points[idx],
                 mode="markers",
                 name=label,
-                marker={
-                    "size": [
-                        (9 if metas[i]["kind"] == "chunk" else 6) * scale for i in idx
-                    ],
-                    "symbol": [
-                        "circle" if metas[i]["kind"] == "chunk" else "circle-open"
-                        for i in idx
-                    ],
-                    "opacity": 0.8,
-                },
+                marker={"size": 8 * scale, "opacity": 0.8},
                 customdata=[
                     [
-                        metas[i]["chunk_id"],
-                        metas[i]["kind"],
+                        metas[i]["unit_id"],
                         metas[i].get("path", ""),
-                        metas[i].get("heading", ""),
+                        metas[i].get("section", ""),
                         snippet(docs[i]),
                     ]
                     for i in idx
                 ],
                 hovertemplate=(
-                    "<b>%{customdata[0]}</b> (%{customdata[1]})<br>"
-                    "%{customdata[2]}<br><i>%{customdata[3]}</i><br>"
-                    "%{customdata[4]}<extra></extra>"
+                    "<b>%{customdata[0]}</b><br>"
+                    "%{customdata[1]}<br><i>%{customdata[2]}</i><br>"
+                    "%{customdata[3]}<extra></extra>"
                 ),
             )
         )
 
     # 검색 상위 결과는 테두리로 강조한다
-    hit_idx = [i for i, m in enumerate(metas) if m["chunk_id"] in hit_ids]
+    hit_idx = [i for i, m in enumerate(metas) if m["unit_id"] in hit_ids]
     if hit_idx:
         fig.add_trace(
             scatter(
@@ -394,23 +376,17 @@ def build_static_map(plt, points, metas, color, query_points, queries, hit_ids):
     groups = sorted(set(labels))
     cmap = plt.get_cmap("tab20", max(len(groups), 1))
     for n, label in enumerate(groups):
-        for kind, marker in (("chunk", "o"), ("child", ".")):
-            idx = [
-                i
-                for i, lab in enumerate(labels)
-                if lab == label and metas[i]["kind"] == kind
-            ]
-            if idx:
-                ax.scatter(
-                    points[idx, 0],
-                    points[idx, 1],
-                    s=30 if kind == "chunk" else 12,
-                    marker=marker,
-                    color=cmap(n),
-                    alpha=0.75,
-                    label=label if kind == "chunk" else None,
-                )
-    hit_idx = [i for i, m in enumerate(metas) if m["chunk_id"] in hit_ids]
+        idx = [i for i, lab in enumerate(labels) if lab == label]
+        ax.scatter(
+            points[idx, 0],
+            points[idx, 1],
+            s=18,
+            marker="o",
+            color=cmap(n),
+            alpha=0.75,
+            label=label,
+        )
+    hit_idx = [i for i, m in enumerate(metas) if m["unit_id"] in hit_ids]
     if hit_idx:
         ax.scatter(
             points[hit_idx, 0],
@@ -432,7 +408,7 @@ def build_static_map(plt, points, metas, color, query_points, queries, hit_ids):
 
 
 def cmd_map(args, collection) -> None:
-    got = fetch(collection, args.book_id, args.kind)
+    got = fetch(collection, args.book_id)
     if len(got["ids"]) < 3:
         raise SystemExit("시각화할 벡터가 부족합니다. 필터 조건을 확인하세요")
     vectors = np.asarray(got["embeddings"], dtype=np.float32)
@@ -443,10 +419,11 @@ def cmd_map(args, collection) -> None:
         model = load_model()
         # t-SNE는 새 점을 따로 변환할 수 없어서 질의 벡터를 함께 넣어 축소한다
         vectors = np.vstack([vectors, np.asarray(embed(model, args.query))])
+        finder = ParagraphIndex(model, collection)
         for q in args.query:
-            hits = search(q, args.k, args.book_id, None, model, collection)
-            hit_ids.update(h["chunk_id"] for h in hits)
-            logger.info("%s → %s", q, [h["chunk_id"] for h in hits])
+            hits = finder.find(q, args.book_id)[: args.k]
+            hit_ids.update(h["unit_id"] for h in hits)
+            logger.info("%s → %s", q, [h["unit_id"] for h in hits])
 
     points = reduce(vectors, args.method, args.dim)
     n = len(got["ids"])
@@ -491,16 +468,15 @@ def cmd_map(args, collection) -> None:
 
 def add_selection_args(p: argparse.ArgumentParser, default_limit: int) -> None:
     target = p.add_mutually_exclusive_group()
-    target.add_argument("--query", help="검색 상위 조각 + 질의 벡터")
-    target.add_argument("--page-id", type=int, help="한 페이지의 조각들")
+    target.add_argument("--query", help="검색 상위 문단 + 질의 벡터")
+    target.add_argument("--page-id", type=int, help="한 페이지의 문단들")
     target.add_argument("--ids", nargs="+", help="벡터 ID 직접 지정")
     p.add_argument("--book-id", type=int, default=None)
-    p.add_argument("--kind", choices=["all", "chunk", "child"], default="chunk")
     p.add_argument(
         "--limit",
         type=int,
         default=default_limit,
-        help="최대 벡터 수 (--query면 검색 조각 수)",
+        help="최대 벡터 수 (--query면 검색 문단 수)",
     )
 
 
@@ -533,12 +509,9 @@ def main() -> None:
 
     p_map = sub.add_parser("map", help="2D 산점도")
     p_map.add_argument("--book-id", type=int, default=None)
-    p_map.add_argument("--kind", choices=["all", "chunk", "child"], default="all")
     p_map.add_argument("--method", choices=["tsne", "umap", "pca"], default="tsne")
     p_map.add_argument("--dim", type=int, choices=[2, 3], default=2, help="축소 차원")
-    p_map.add_argument(
-        "--color", choices=["chapter", "book", "kind"], default="chapter"
-    )
+    p_map.add_argument("--color", choices=["chapter", "book"], default="chapter")
     p_map.add_argument("--query", action="append", default=[], help="여러 번 지정 가능")
     p_map.add_argument("--k", type=int, default=5, help="질의별 강조할 검색 결과 수")
 

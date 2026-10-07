@@ -1,14 +1,15 @@
-"""수집 → 정제 → 조각 임베딩 → 문장 인덱스를 한 번에 실행한다.
+"""수집 → 정제 → 문단 임베딩을 한 번에 실행한다.
 
 각 단계는 이미 증분 처리(내용이 바뀐 파일·벡터만 갱신)를 하므로, 바뀐 게 없으면 빨리 지나간다.
-임베딩 모델(bge-m3)은 한 번만 불러와 조각 임베딩과 문장 인덱스가 함께 쓴다.
+문단 임베딩 단계는 chunks.jsonl에서 A+ 문단을 만들어 paragraphs.jsonl에 저장하고 bge-m3로
+임베딩한다 (조각·소제목·문장 단위의 옛 임베딩은 폐기했다).
 
 수집은 기본적으로 캐시(raw HTML)만 쓴다. 외부 요청이 필요한 새 수집은 --crawl을 붙여야 한다.
 
 사용 예:
-    python pipeline.py                          # 모든 책: 수집(캐시) → 정제 → 조각 임베딩 → 문장 인덱스
+    python pipeline.py                          # 모든 책: 수집(캐시) → 정제 → 문단 임베딩
     python pipeline.py --book-id 110            # 특정 책만
-    python pipeline.py --from embed             # 조각 임베딩부터
+    python pipeline.py --from embed             # 문단 임베딩부터
     python pipeline.py --to refine              # 정제까지
     python pipeline.py --rebuild --from embed   # 벡터 저장소를 archive로 옮기고 새로 생성
     python pipeline.py --crawl --book-id 2      # 새 책 수집 (위키독스에 외부 요청)
@@ -23,18 +24,17 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-import evidence
+import paragraphs
 import text_embed
 import text_ingestion
 import text_refine
 from text_ingestion import DATA_ROOT, Paths, move_to_archive
 
-STAGES = ("ingest", "refine", "embed", "evidence")
+STAGES = ("ingest", "refine", "embed")
 STAGE_LABELS = {
     "ingest": "수집",
     "refine": "정제",
-    "embed": "조각 임베딩",
-    "evidence": "문장 인덱스",
+    "embed": "문단 임베딩",
 }
 BOOK_DIR = re.compile(r"book(\d+)")
 
@@ -56,8 +56,7 @@ class Pipeline:
         self.crawl = crawl
         self.rebuild = rebuild
         self._model = None
-        self.chunk_collection = None
-        self.sentence_collection = None
+        self.collection = None
 
     @property
     def model(self):
@@ -90,24 +89,14 @@ class Pipeline:
         )
 
     def embed(self, book_id: int) -> None:
-        text_embed.index_book(self.book_dir(book_id), self.chunk_collection, self.model)
-
-    def evidence(self, book_id: int) -> None:
-        evidence.index_book(
-            self.book_dir(book_id), self.sentence_collection, self.model
-        )
+        paragraphs.index_book(self.book_dir(book_id), self.collection, self.model)
 
     def run(self, stages: list[str]) -> None:
-        if self.rebuild:
+        if self.rebuild and "embed" in stages:
             # 저장소를 지우지 않고 archive로 옮긴다
-            if "embed" in stages:
-                move_to_archive(text_embed.VECTORSTORE_DIR)
-            if "evidence" in stages:
-                move_to_archive(evidence.SENTENCE_STORE_DIR)
+            move_to_archive(paragraphs.VECTORSTORE_DIR)
         if "embed" in stages:
-            self.chunk_collection = text_embed.get_collection()
-        if "evidence" in stages:
-            self.sentence_collection = evidence.get_sentence_collection()
+            self.collection = paragraphs.get_collection()
 
         elapsed: list[tuple[str, int, float]] = []
         for stage in stages:
@@ -131,14 +120,14 @@ class Pipeline:
             return
         print("\n=== 파이프라인 요약 ===")
         for stage, book_id, sec in elapsed:
-            print(f"  {STAGE_LABELS[stage]:<7} book{book_id:<5} {sec:7.1f}초")
+            print(f"  {STAGE_LABELS[stage]:<9} book{book_id:<5} {sec:7.1f}초")
         print(f"  합계 {sum(s for _, _, s in elapsed):.1f}초")
 
 
 def main() -> None:
     load_dotenv()
     parser = argparse.ArgumentParser(
-        description="수집 → 정제 → 조각 임베딩 → 문장 인덱스 원클릭 실행"
+        description="수집 → 정제 → 문단 임베딩 원클릭 실행"
     )
     parser.add_argument(
         "--book-id",
@@ -161,7 +150,7 @@ def main() -> None:
     parser.add_argument(
         "--rebuild",
         action="store_true",
-        help="범위 안의 벡터 저장소(조각·문장)를 archive로 옮기고 새로 생성",
+        help="범위 안의 벡터 저장소를 archive로 옮기고 새로 생성",
     )
     args = parser.parse_args()
 
