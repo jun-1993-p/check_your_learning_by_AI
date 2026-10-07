@@ -28,7 +28,14 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 import quiz_templates as qt
-from text_embed import DATA_ROOT, get_collection, load_chunks, load_model, search
+from text_embed import (
+    DATA_ROOT,
+    child_ranges,
+    get_collection,
+    load_chunks,
+    load_model,
+    search,
+)
 
 DEFAULT_MODEL = "qwen/qwen3.8-27b"
 ANSWER_TEMPERATURE = 0.2
@@ -161,6 +168,29 @@ def locate_section(chunk: dict, hit: dict) -> tuple[str, str]:
     return section_path, f"{base}#{anchor}" if anchor else hit["source_url"]
 
 
+def render_blocks(blocks: list[dict]) -> str:
+    return "\n".join(t for b in blocks if (t := render_block(b).strip()))
+
+
+def source_body(chunk: dict, hit: dict) -> str:
+    """조각 본문. 너무 길면 검색에 걸린 부분(part) 또는 소제목 구간의 블록만 쓴다."""
+    blocks = chunk["blocks"]
+    body = render_blocks(blocks)
+    if len(body) <= MAX_SOURCE_CHARS:
+        return body
+    if hit.get("block_start") is not None:
+        body = render_blocks(blocks[hit["block_start"] : hit["block_end"]])
+    elif hit["matched"] == "child":
+        span = next(
+            ((s, e) for h, s, e in child_ranges(blocks) if h == hit["heading"]), None
+        )
+        if span:
+            body = render_blocks(blocks[span[0] : span[1]])
+    if len(body) > MAX_SOURCE_CHARS:
+        body = body[:MAX_SOURCE_CHARS] + "\n...(생략)"
+    return body
+
+
 def filter_hits(hits: list[dict], max_distance: float, margin: float) -> list[dict]:
     if not hits:
         return []
@@ -192,9 +222,7 @@ def retrieve(
                 "chunks.jsonl에 없는 조각: %s (--rebuild 필요)", hit["chunk_id"]
             )
             continue
-        body = "\n".join(t for b in chunk["blocks"] if (t := render_block(b).strip()))
-        if len(body) > MAX_SOURCE_CHARS:
-            body = body[:MAX_SOURCE_CHARS] + "\n...(생략)"
+        body = source_body(chunk, hit)
         path, url = locate_section(chunk, hit)
         sources.append(
             Source(

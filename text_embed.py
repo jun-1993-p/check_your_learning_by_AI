@@ -2,6 +2,8 @@
 
 조각(chunk) 단위 벡터와 소제목(child) 단위 벡터를 함께 저장하고,
 검색 결과는 부모 조각 단위로 묶어서 돌려준다.
+조각(또는 소제목 구간)이 길면 부분(part) 벡터를 더한다. 정제 단계에서 조각을 다시 나누지 않고도
+긴 조각에서 질의와 가까운 블록 범위만 자료로 쓸 수 있게 한다(조각 순위에는 쓰지 않는다).
 
 사용 예:
     python text_embed.py                       # 모든 책 증분 임베딩
@@ -30,6 +32,13 @@ COLLECTION_NAME = "chunks_bge-m3"
 MAX_SEQ_LENGTH = 2048  # 가장 긴 조각도 이 안에 들어간다 (bge-m3 최대 8192)
 BATCH_SIZE = 8
 CODE_MAX_LINES = 8  # 코드 비중이 벡터를 지배하지 않도록 블록당 앞부분만 넣는다
+PART_MAX_CHARS = 2000  # 임베딩 텍스트가 이보다 긴 구간만 부분으로 나눈다
+PART_TARGET_CHARS = 1500  # 부분 하나의 목표 길이
+PART_MIN_CHARS = 400  # 목표 길이로 끊다 남은 꼬리가 이보다 짧으면 앞 부분에 붙인다
+CODE_BLOCKS = ("code", "code_example")
+SEARCH_FETCH_FACTOR = (
+    8  # 한 조각의 여러 단위(조각·소제목·부분)가 겹치므로 k의 배수로 가져온다
+)
 IMAGE_PLACEHOLDER = re.compile(r"\[이미지: [^\]]*\]")
 PROMPT_PREFIX = re.compile(r"^(>>>|\.\.\.) ?")
 
@@ -93,6 +102,67 @@ def split_children(blocks: list[dict]) -> list[tuple[str, list[dict]]]:
     return children
 
 
+def child_ranges(blocks: list[dict]) -> list[tuple[str, int, int]]:
+    """split_children과 같은 기준의 (소제목, 시작, 끝) 블록 범위. 도입부는 첫 소제목에 붙인다."""
+    starts = [
+        n
+        for n, b in enumerate(blocks)
+        if b["type"] == "heading" and b["level"] in (2, 3)
+    ]
+    return [
+        (
+            blocks[s]["text"],
+            0 if i == 0 else s,
+            starts[i + 1] if i + 1 < len(starts) else len(blocks),
+        )
+        for i, s in enumerate(starts)
+    ]
+
+
+def _block_groups(blocks: list[dict], start: int, end: int) -> list[tuple[int, int]]:
+    """끊을 수 있는 최소 묶음. 설명 블록과 바로 뒤의 코드·실행 예시는 한 묶음이다."""
+    groups: list[list[int]] = []
+    for n in range(start, end):
+        if blocks[n]["type"] in CODE_BLOCKS and groups:
+            groups[-1][1] = n + 1
+        else:
+            groups.append([n, n + 1])
+    return [(s, e) for s, e in groups]
+
+
+def part_ranges(blocks: list[dict], start: int, end: int) -> list[tuple[int, int]]:
+    """[start, end) 구간이 길면 부분 범위들로 나눈다. 나눌 필요가 없으면 빈 목록.
+
+    subheading 경계에서 먼저 나누고, 그래도 긴 구간은 묶음을 쌓아 목표 길이에서 끊는다.
+    """
+
+    def length(s: int, e: int) -> int:
+        return sum(len(block_to_text(b)) for b in blocks[s:e])
+
+    if length(start, end) <= PART_MAX_CHARS:
+        return []
+    cuts = [n for n in range(start + 1, end) if blocks[n]["type"] == "subheading"]
+    segments = list(zip([start, *cuts], [*cuts, end]))
+    parts: list[tuple[int, int]] = []
+    for seg_start, seg_end in segments:
+        if length(seg_start, seg_end) <= PART_MAX_CHARS:
+            parts.append((seg_start, seg_end))
+            continue
+        packed: list[tuple[int, int]] = []
+        cur_start, cur_len = seg_start, 0
+        for g_start, g_end in _block_groups(blocks, seg_start, seg_end):
+            g_len = length(g_start, g_end)
+            if cur_len and cur_len + g_len > PART_TARGET_CHARS:
+                packed.append((cur_start, g_start))
+                cur_start, cur_len = g_start, 0
+            cur_len += g_len
+        if packed and cur_len < PART_MIN_CHARS:  # 짧은 꼬리는 앞 부분에 붙인다
+            cur_start = packed.pop()[0]
+        packed.append((cur_start, seg_end))
+        parts += packed
+    return parts if len(parts) > 1 else []
+
+
 def _metadata(chunk: dict, kind: str, heading: str, text: str) -> dict:
     meta = {
         "chunk_id": chunk["chunk_id"],
@@ -124,21 +194,47 @@ def build_units(chunk: dict) -> list[Unit]:
             metadata=_metadata(chunk, "chunk", "", text),
         )
     ]
-    children = split_children(chunk["blocks"])
-    if len(children) < 2:  # 소제목이 하나뿐이면 조각 벡터와 같다
-        return units
-    for n, (heading, blocks) in enumerate(children, start=1):
-        child_text = build_embed_text([*path, heading], [], blocks)
-        units.append(
-            Unit(
-                id=f"{chunk['chunk_id']}#c{n:02d}",
-                chunk_id=chunk["chunk_id"],
-                kind="child",
-                heading=heading,
-                text=child_text,
-                metadata=_metadata(chunk, "child", heading, child_text),
+    blocks = chunk["blocks"]
+    children = split_children(blocks)
+    if len(children) >= 2:  # 소제목이 하나뿐이면 조각 벡터와 같다
+        for n, (heading, child_blocks) in enumerate(children, start=1):
+            child_text = build_embed_text([*path, heading], [], child_blocks)
+            units.append(
+                Unit(
+                    id=f"{chunk['chunk_id']}#c{n:02d}",
+                    chunk_id=chunk["chunk_id"],
+                    kind="child",
+                    heading=heading,
+                    text=child_text,
+                    metadata=_metadata(chunk, "child", heading, child_text),
+                )
             )
-        )
+        regions = child_ranges(blocks)
+    else:
+        regions = [("", 0, len(blocks))]
+
+    n_part = 0
+    for heading, start, end in regions:
+        for part_start, part_end in part_ranges(blocks, start, end):
+            n_part += 1
+            sub = blocks[part_start]
+            part_heading = sub["text"] if sub["type"] == "subheading" else heading
+            part_path = [*path, heading] if heading else path
+            part_text = build_embed_text(part_path, [], blocks[part_start:part_end])
+            units.append(
+                Unit(
+                    id=f"{chunk['chunk_id']}#p{n_part:02d}",
+                    chunk_id=chunk["chunk_id"],
+                    kind="part",
+                    heading=part_heading,
+                    text=part_text,
+                    metadata={
+                        **_metadata(chunk, "part", part_heading, part_text),
+                        "block_start": part_start,
+                        "block_end": part_end,
+                    },
+                )
+            )
     return units
 
 
@@ -219,11 +315,12 @@ def index_book(book_dir: Path, collection, model) -> None:
             len(stale),
         )
     logger.info(
-        "%s: 단위 %d개 (조각 %d, 소제목 %d), 새로 임베딩 %d개",
+        "%s: 단위 %d개 (조각 %d, 소제목 %d, 부분 %d), 새로 임베딩 %d개",
         book_dir.name,
         len(units),
         sum(u.kind == "chunk" for u in units),
         sum(u.kind == "child" for u in units),
+        sum(u.kind == "part" for u in units),
         len(todo),
     )
     if not todo:
@@ -254,7 +351,12 @@ def search(
     model=None,
     collection=None,
 ) -> list[dict]:
-    """질의와 가까운 조각을 찾는다. 소제목 벡터가 걸려도 부모 조각으로 묶는다."""
+    """질의와 가까운 조각을 찾는다. 소제목 벡터가 걸려도 부모 조각으로 묶는다.
+
+    조각 순위는 조각·소제목 벡터로만 정한다. 부분(part) 벡터는 짧고 코드 비중이 커서
+    짧은 질의("리스트")에 다른 페이지의 코드 부분이 끼어들기 때문이다. 부분 벡터는
+    고른 조각 안에서 가장 가까운 블록 범위(block_start, block_end)를 찾는 데만 쓴다.
+    """
     model = model or load_model()
     collection = collection or get_collection()
     filters = [
@@ -262,13 +364,11 @@ def search(
         for key, value in (("book_id", book_id), ("page_id", page_id))
         if value is not None
     ]
-    where = (
-        filters[0] if len(filters) == 1 else ({"$and": filters} if filters else None)
-    )
+    query_vec = embed(model, [query])
     result = collection.query(
-        query_embeddings=embed(model, [query]),
-        n_results=k * 4,  # 같은 조각의 여러 단위가 겹치므로 넉넉히 가져온다
-        where=where,
+        query_embeddings=query_vec,
+        n_results=k * SEARCH_FETCH_FACTOR,  # 같은 조각의 여러 단위가 겹치므로 넉넉히
+        where=_where([*filters, {"kind": {"$ne": "part"}}]),
         include=["metadatas", "distances"],
     )
     best: dict[str, dict] = {}
@@ -282,8 +382,35 @@ def search(
                 "heading": meta.get("heading", ""),
                 "path": meta.get("path", ""),
                 "source_url": meta.get("source_url", ""),
+                "block_start": None,
+                "block_end": None,
             }
-    return sorted(best.values(), key=lambda r: r["distance"])[:k]
+    hits = sorted(best.values(), key=lambda r: r["distance"])[:k]
+    if not hits:
+        return hits
+
+    by_id = {h["chunk_id"]: h for h in hits}
+    parts = collection.query(
+        query_embeddings=query_vec,
+        n_results=k * SEARCH_FETCH_FACTOR,
+        where=_where([{"kind": "part"}, {"chunk_id": {"$in": list(by_id)}}]),
+        include=["metadatas"],
+    )
+    for meta in parts["metadatas"][
+        0
+    ]:  # 거리순이라 조각마다 처음 나온 부분이 가장 가깝다
+        hit = by_id[meta["chunk_id"]]
+        if hit["block_start"] is None:
+            hit["block_start"] = meta["block_start"]
+            hit["block_end"] = meta["block_end"]
+            hit["part_heading"] = meta.get("heading", "")
+    return hits
+
+
+def _where(filters: list[dict]) -> dict | None:
+    if not filters:
+        return None
+    return filters[0] if len(filters) == 1 else {"$and": filters}
 
 
 def main() -> None:
@@ -313,6 +440,11 @@ def main() -> None:
             )
             if r["matched"] == "child":
                 print(f"{'':>16}↳ {r['heading']}")
+            if r["block_start"] is not None:
+                print(
+                    f"{'':>16}↳ 가까운 부분: 블록 {r['block_start']}~{r['block_end']}"
+                    f" {r.get('part_heading', '')}"
+                )
             print(f"{'':>16}{r['source_url']}")
         return
 
