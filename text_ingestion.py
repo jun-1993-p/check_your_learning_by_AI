@@ -10,7 +10,6 @@
 """
 
 import argparse
-import hashlib
 import json
 import logging
 import os
@@ -25,7 +24,7 @@ from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-from bs4 import BeautifulSoup, NavigableString, Tag
+from bs4 import BeautifulSoup
 from dotenv import load_dotenv
 
 BASE_URL = "https://wikidocs.net"
@@ -44,10 +43,7 @@ DEFAULT_DELAY_SEC = 10.0
 MAX_RETRIES = 3
 TIMEOUT_SEC = 15
 
-# 본문(div.page-content) 안에 섞여 있는 노이즈
-NOISE_SELECTORS = ["div.ad-wrapper", "div.toc", "script", "ins", "style", "legend"]
 ZERO_WIDTH = re.compile(r"[\u200B\u200C\u200D\uFEFF]")
-INLINE_WS = re.compile(r"[ \t\r\n]+")
 PAGE_PATH = re.compile(r"^/(\d+)/?$")
 BOOK_PATH = re.compile(r"^/book/(\d+)/?$")
 
@@ -78,9 +74,7 @@ class PageRecord:
     title: str
     breadcrumb: list[str]
     url: str
-    text: str
-    fetched_at: str
-    content_hash: str
+    fetched_at: str  # 본문은 담지 않는다. 정제 단계가 raw/{id}.html을 직접 읽는다
 
 
 @dataclass
@@ -226,17 +220,6 @@ def build_breadcrumb(item: TocItem, by_id: dict[int, TocItem]) -> list[str]:
     return path[::-1]
 
 
-def extract_body(html: str) -> Tag:
-    soup = BeautifulSoup(html, "html.parser")
-    body = soup.select_one("div.page-content")
-    if body is None:
-        raise ValueError("본문(div.page-content)을 찾을 수 없음")
-    for selector in NOISE_SELECTORS:
-        for node in body.select(selector):
-            node.decompose()
-    return body
-
-
 # ---------------------------------------------------------------- 정제
 
 
@@ -244,126 +227,6 @@ def normalize(text: str) -> str:
     text = unicodedata.normalize("NFC", text)
     text = text.replace("\u00a0", " ")
     return ZERO_WIDTH.sub("", text)
-
-
-def _image_placeholder(img: Tag) -> str:
-    alt = (img.get("alt") or "").strip()
-    name = alt or Path(img.get("src") or "").name or "image"
-    return f"[이미지: {name}]"
-
-
-def render_inline(node) -> str:
-    if isinstance(node, NavigableString):
-        return INLINE_WS.sub(" ", str(node))
-    if not isinstance(node, Tag):
-        return ""
-    if node.name == "br":
-        return "\n"
-    if node.name == "img":
-        return _image_placeholder(node)
-    inner = "".join(render_inline(c) for c in node.children)
-    if node.name == "code":
-        return f"`{inner.strip()}`"
-    if node.name in ("strong", "b"):
-        return f"**{inner.strip()}**" if inner.strip() else ""
-    return inner
-
-
-def _clean_lines(text: str) -> str:
-    return "\n".join(line.strip() for line in text.split("\n")).strip()
-
-
-def render_code(pre: Tag) -> str:
-    code = pre.find("code") or pre
-    lang = ""
-    for cls in code.get("class") or []:
-        if cls.startswith("language-"):
-            lang = cls.removeprefix("language-")
-    body = code.get_text().rstrip("\n")
-    return f"```{lang}\n{body}\n```"
-
-
-def render_list(lst: Tag, indent: int = 0) -> str:
-    lines = []
-    ordered = lst.name == "ol"
-    for i, li in enumerate(lst.find_all("li", recursive=False), start=1):
-        marker = f"{i}." if ordered else "-"
-        inline = []
-        nested = []
-        for child in li.children:
-            if isinstance(child, Tag) and child.name in ("ul", "ol"):
-                nested.append(render_list(child, indent + 1))
-            elif isinstance(child, Tag) and child.name == "pre":
-                nested.append(render_code(child))
-            else:
-                inline.append(render_inline(child))
-        lines.append(f"{'  ' * indent}{marker} {_clean_lines(''.join(inline))}")
-        lines.extend(nested)
-    return "\n".join(lines)
-
-
-def render_table(table: Tag) -> str:
-    rows = []
-    for tr in table.find_all("tr"):
-        cells = [
-            _clean_lines(render_inline(c)).replace("\n", " ")
-            for c in tr.find_all(["th", "td"])
-        ]
-        rows.append("| " + " | ".join(cells) + " |")
-    return "\n".join(rows)
-
-
-def render_blocks(container: Tag) -> list[str]:
-    blocks: list[str] = []
-    inline_buf: list[str] = []
-
-    def flush() -> None:
-        text = _clean_lines("".join(inline_buf))
-        if text:
-            blocks.append(text)
-        inline_buf.clear()
-
-    for node in container.children:
-        if not isinstance(node, Tag):
-            inline_buf.append(render_inline(node))
-            continue
-        name = node.name
-        if name in ("h1", "h2", "h3", "h4", "h5", "h6"):
-            flush()
-            title = _clean_lines(render_inline(node))
-            if title:
-                blocks.append(f"{'#' * int(name[1])} {title}")
-        elif name == "p":
-            flush()
-            text = _clean_lines(render_inline(node))
-            if text:
-                blocks.append(text)
-        elif name == "pre":
-            flush()
-            blocks.append(render_code(node))
-        elif name in ("ul", "ol"):
-            flush()
-            blocks.append(render_list(node))
-        elif name == "table":
-            flush()
-            blocks.append(render_table(node))
-        elif name == "blockquote":
-            flush()
-            inner = "\n\n".join(render_blocks(node))
-            blocks.append("\n".join(f"> {line}".rstrip() for line in inner.split("\n")))
-        elif name in ("div", "fieldset", "section"):
-            flush()
-            blocks.extend(render_blocks(node))
-        elif name == "hr":
-            flush()
-        else:
-            inline_buf.append(render_inline(node))
-    flush()
-    return blocks
-
-
-def clean_text(body: Tag) -> str:
-    return normalize("\n\n".join(render_blocks(body)))
 
 
 # ---------------------------------------------------------------- 저장
@@ -387,13 +250,24 @@ def archive_path(path: Path) -> Path:
     return target
 
 
-def move_to_archive(path: Path) -> None:
+def move_to_archive(path: Path) -> Path | None:
+    """파일·폴더를 archive로 옮기고 옮긴 위치를 돌려준다. 없으면 None."""
     if not path.exists():
-        return
+        return None
     ARCHIVE_DIR.mkdir(exist_ok=True)
     target = archive_path(path)
     shutil.move(str(path), str(target))
     logger.info("archive로 이동: %s -> %s", path, target)
+    return target
+
+
+def write_if_changed(path: Path, content: str) -> bool:
+    """내용이 바뀐 경우에만 기존 파일을 archive로 옮기고 새로 쓴다. 바뀌었으면 True."""
+    if path.exists() and path.read_text(encoding="utf-8") == content:
+        return False
+    move_to_archive(path)
+    path.write_text(content, encoding="utf-8")
+    return True
 
 
 def load_done_ids(pages_file: Path) -> set[int]:
@@ -435,13 +309,11 @@ def remove_records(pages_file: Path, ids: set[int]) -> None:
 
 def make_record(
     item: TocItem,
-    html: str,
     cache_file: Path,
     by_id: dict[int, TocItem],
     book_id: int | None,
     book_title: str | None,
 ) -> PageRecord:
-    text = clean_text(extract_body(html))
     fetched_at = datetime.fromtimestamp(cache_file.stat().st_mtime)  # noqa: DTZ006
     return PageRecord(
         id=item.id,
@@ -453,9 +325,7 @@ def make_record(
         title=item.title,
         breadcrumb=build_breadcrumb(item, by_id),
         url=f"{BASE_URL}/{item.id}",
-        text=text,
         fetched_at=fetched_at.isoformat(timespec="seconds"),
-        content_hash=hashlib.sha256(text.encode("utf-8")).hexdigest(),
     )
 
 
@@ -496,10 +366,10 @@ def run(
             time.sleep(delay)
         cache_file = paths.raw_dir / f"{item.id}.html"
         try:
-            html, used_network = load_or_fetch(
+            _, used_network = load_or_fetch(
                 f"{BASE_URL}/{item.id}", cache_file, headers, offline
             )
-            record = make_record(item, html, cache_file, by_id, book_id, book_title)
+            record = make_record(item, cache_file, by_id, book_id, book_title)
         except FetchBlockedError as e:
             logger.error("차단 응답으로 중단: %s", e)
             failed[item.id] = str(e)
@@ -516,14 +386,7 @@ def run(
             used_network = False
             continue
         append_record(paths.pages_file, record)
-        logger.info(
-            "[%d/%d] %s %s (%d자)",
-            n,
-            len(targets),
-            item.id,
-            item.title,
-            len(record.text),
-        )
+        logger.info("[%d/%d] %s %s", n, len(targets), item.id, item.title)
 
     # 지난 실행의 실패 기록은 이번 결과로 대체한다
     move_to_archive(paths.failed_file)
@@ -571,17 +434,11 @@ def ingest_page(
     if already_done and not refresh:
         logger.info("%s: 이미 수집됨, 건너뜀 (--refresh로 교체)", page_id)
         return used_network
-    record = make_record(item, html, cache_file, by_id, book_id, book_title)
+    record = make_record(item, cache_file, by_id, book_id, book_title)
     if already_done:
         remove_records(paths.pages_file, {page_id})
     append_record(paths.pages_file, record)
-    logger.info(
-        "%s %s -> %s (%d자)",
-        page_id,
-        " > ".join(record.breadcrumb),
-        paths.pages_file,
-        len(record.text),
-    )
+    logger.info("%s %s -> %s", page_id, " > ".join(record.breadcrumb), paths.pages_file)
     return used_network
 
 

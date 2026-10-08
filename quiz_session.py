@@ -1,6 +1,6 @@
 """임베딩한 개념 문단(A+)을 근거로 질문에 답하고, 확인 퀴즈를 만든다.
 
-검색(paragraphs.ParagraphIndex) → 문단 본문 조립 → Groq LLM 답변 → 퀴즈 생성 순서로 동작한다.
+검색(text_paragraphs.ParagraphIndex) → 문단 본문 조립 → Groq LLM 답변 → 퀴즈 생성 순서로 동작한다.
 답변과 퀴즈는 검색된 문단에만 근거하며, 출처 번호와 URL을 함께 보여 준다.
 퀴즈 유형별 스키마·검증·채점은 quiz_templates.py에 있다.
 
@@ -9,11 +9,11 @@
     GROQ_MODEL=qwen/qwen3.8-27b   # 선택. 생략하면 기본값
 
 사용 예:
-    python text_answer.py "문자열 공백 제거는 어떻게 해?"
-    python text_answer.py "리스트 슬라이싱" --book-id 1 --k 4
-    python text_answer.py "딕셔너리" --quiz 6 --solve        # 퀴즈를 터미널에서 직접 풀기
-    python text_answer.py "문자열 공백 제거" --formats ox,blank --quiz 4
-    python text_answer.py "튜플" --no-quiz
+    python quiz_session.py "문자열 공백 제거는 어떻게 해?"
+    python quiz_session.py "리스트 슬라이싱" --book-id 1 --k 4
+    python quiz_session.py "딕셔너리" --quiz 6 --solve        # 퀴즈를 터미널에서 직접 풀기
+    python quiz_session.py "문자열 공백 제거" --formats ox,blank --quiz 4
+    python quiz_session.py "튜플" --no-quiz
 """
 
 import argparse
@@ -28,8 +28,8 @@ from dataclasses import dataclass
 from dotenv import load_dotenv
 
 import quiz_templates as qt
-from paragraphs import ParagraphIndex, get_collection
 from text_embed import load_chunk_index, load_model
+from text_paragraphs import ParagraphIndex, get_collection
 
 DEFAULT_MODEL = "qwen/qwen3.8-27b"
 ANSWER_TEMPERATURE = 0.2
@@ -38,14 +38,16 @@ QUIZ_TEMPERATURE = 0.5
 ANSWER_MAX_TOKENS = 700
 QUIZ_MAX_TOKENS = 900
 # 관련 없는 문단이 근거로 섞이지 않도록 거르는 기준 (코사인 거리, 작을수록 가깝다).
-# 문단 거리는 0.3~0.6에 퍼져 있어 처음 값으로 잡았다. 테스트 결과를 보고 조정한다
-MAX_DISTANCE = 0.6  # 이보다 먼 문단은 버린다
+# 관련 질문 15개와 무관 질문 6개로 재어 정했다: 0.45에서 관련 질문 14개가 근거를 얻고 무관 질문은
+# 전부 걸러진다 (0.5는 무관 질문 3개 통과, 0.6은 5개 통과). 넓은 표현의 질문("변수란 무엇인가",
+# 최고 거리 0.51)은 놓칠 수 있다
+MAX_DISTANCE = 0.45  # 이보다 먼 문단은 버린다
 DISTANCE_MARGIN = 0.15  # 1위보다 이만큼 이상 먼 문단은 버린다
 THINK_TAG = re.compile(r"<think>.*?</think>", re.DOTALL)
 JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 CITATION = re.compile(r"\[(\d+)\]")
 
-logger = logging.getLogger("text_answer")
+logger = logging.getLogger("quiz_session")
 
 ANSWER_SYSTEM = """너는 프로그래밍 학습을 돕는 튜터야.
 - 반드시 아래 [자료]에 있는 내용만 근거로 한국어로 답해.

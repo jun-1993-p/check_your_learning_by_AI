@@ -1,18 +1,21 @@
 """수집 → 정제 → 문단 임베딩을 한 번에 실행한다.
 
 각 단계는 이미 증분 처리(내용이 바뀐 파일·벡터만 갱신)를 하므로, 바뀐 게 없으면 빨리 지나간다.
-문단 임베딩 단계는 chunks.jsonl에서 A+ 문단을 만들어 paragraphs.jsonl에 저장하고 bge-m3로
-임베딩한다 (조각·소제목·문장 단위의 옛 임베딩은 폐기했다).
+문단 임베딩 단계는 chunks.jsonl(페이지 하나 = 한 줄)에서 A+ 문단을 만들어 bge-m3로 임베딩한다.
+문단은 파일로 저장하지 않는다 (조각·소제목·문장 단위의 옛 임베딩은 폐기했다).
+--rebuild는 정제를 건너뛰지 않고 다시 하고, 벡터 저장소를 archive로 옮겨 새로 만들되
+임베딩 텍스트가 같은 문단의 벡터는 옛 저장소에서 가져와 재사용한다.
 
 수집은 기본적으로 캐시(raw HTML)만 쓴다. 외부 요청이 필요한 새 수집은 --crawl을 붙여야 한다.
 
 사용 예:
-    python pipeline.py                          # 모든 책: 수집(캐시) → 정제 → 문단 임베딩
-    python pipeline.py --book-id 110            # 특정 책만
-    python pipeline.py --from embed             # 문단 임베딩부터
-    python pipeline.py --to refine              # 정제까지
-    python pipeline.py --rebuild --from embed   # 벡터 저장소를 archive로 옮기고 새로 생성
-    python pipeline.py --crawl --book-id 2      # 새 책 수집 (위키독스에 외부 요청)
+    python embed_pipeline.py                          # 모든 책: 수집(캐시) → 정제 → 문단 임베딩
+    python embed_pipeline.py --book-id 110            # 특정 책만
+    python embed_pipeline.py --from embed             # 문단 임베딩부터
+    python embed_pipeline.py --to refine              # 정제까지
+    python embed_pipeline.py --rebuild --from refine  # 건너뛰기 없이 정제부터 다시 (저장소는 archive로 옮기고 새로 생성)
+    python embed_pipeline.py --rebuild --from embed   # 벡터 저장소를 archive로 옮기고 새로 생성
+    python embed_pipeline.py --crawl --book-id 2      # 새 책 수집 (위키독스에 외부 요청)
 """
 
 import argparse
@@ -24,9 +27,9 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
-import paragraphs
 import text_embed
 import text_ingestion
+import text_paragraphs
 import text_refine
 from text_ingestion import DATA_ROOT, Paths, move_to_archive
 
@@ -38,7 +41,7 @@ STAGE_LABELS = {
 }
 BOOK_DIR = re.compile(r"book(\d+)")
 
-logger = logging.getLogger("pipeline")
+logger = logging.getLogger("embed_pipeline")
 
 
 def existing_book_ids() -> list[int]:
@@ -57,6 +60,7 @@ class Pipeline:
         self.rebuild = rebuild
         self._model = None
         self.collection = None
+        self.reuse: dict[str, list[float]] | None = None  # --rebuild: 재사용할 벡터
 
     @property
     def model(self):
@@ -82,21 +86,22 @@ class Pipeline:
         )
 
     def refine(self, book_id: int) -> None:
-        text_refine.refine_book(
-            self.book_dir(book_id),
-            text_refine.DEFAULT_MIN_CHARS,
-            text_refine.DEFAULT_MAX_CHARS,
-        )
+        # 입력(pages.jsonl, 설정)이 그대로면 건너뛴다. --rebuild는 건너뛰지 않고 다시 정제한다
+        text_refine.refine_book(self.book_dir(book_id), force=self.rebuild)
 
     def embed(self, book_id: int) -> None:
-        paragraphs.index_book(self.book_dir(book_id), self.collection, self.model)
+        # 모델은 새로 임베딩할 문단이 있을 때만 불러온다
+        text_paragraphs.index_book(
+            self.book_dir(book_id), self.collection, lambda: self.model, self.reuse
+        )
 
     def run(self, stages: list[str]) -> None:
         if self.rebuild and "embed" in stages:
-            # 저장소를 지우지 않고 archive로 옮긴다
-            move_to_archive(paragraphs.VECTORSTORE_DIR)
+            # 저장소를 지우지 않고 archive로 옮기고, 거기서 읽은 벡터를 다시 쓴다
+            archived = move_to_archive(text_paragraphs.VECTORSTORE_DIR)
+            self.reuse = text_paragraphs.read_embeddings(archived) if archived else None
         if "embed" in stages:
-            self.collection = paragraphs.get_collection()
+            self.collection = text_paragraphs.get_collection()
 
         elapsed: list[tuple[str, int, float]] = []
         for stage in stages:
@@ -150,7 +155,8 @@ def main() -> None:
     parser.add_argument(
         "--rebuild",
         action="store_true",
-        help="범위 안의 벡터 저장소를 archive로 옮기고 새로 생성",
+        help="범위 안의 단계를 건너뛰지 않고 처음부터 다시 만든다 "
+        "(정제는 다시 파싱, 임베딩은 벡터 저장소를 archive로 옮기고 새로 생성)",
     )
     args = parser.parse_args()
 

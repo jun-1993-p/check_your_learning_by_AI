@@ -1,11 +1,13 @@
-"""수집한 raw HTML을 퀴즈 출제용 개념 조각(chunks.jsonl)으로 정제한다.
+"""수집한 raw HTML을 블록(문단·코드·표 등) 단위로 정제해 chunks.jsonl에 저장한다.
 
 text_ingestion.py가 만든 pages.jsonl을 목록으로 삼고, raw/{id}.html만 읽는다.
-네트워크는 사용하지 않는다.
+네트워크는 사용하지 않는다. 페이지 하나가 조각 하나다 (chunk_id = "{page_id}-01").
+입력(pages.jsonl, refine_config.json)이 chunks.jsonl보다 오래됐으면 정제를 건너뛴다.
 
 사용 예:
     python text_refine.py               # .data 아래 모든 책
     python text_refine.py --book-id 1   # 특정 책만
+    python text_refine.py --force       # 입력이 그대로여도 다시 정제
 
 책마다 다른 제외 규칙은 프로젝트 루트의 refine_config.json에 둔다 (선택):
     {
@@ -18,32 +20,21 @@ text_ingestion.py가 만든 pages.jsonl을 목록으로 삼고, raw/{id}.html만
 """
 
 import argparse
-import hashlib
 import json
 import logging
 import re
-from dataclasses import dataclass, field
 from pathlib import Path
 
-from bs4 import NavigableString, Tag
+from bs4 import BeautifulSoup, NavigableString, Tag
 
 from text_ingestion import (
     BASE_URL,
     DATA_ROOT,
     PROJECT_ROOT,
     Paths,
-    _clean_lines,
-    extract_body,
     find_cached_page,
-    move_to_archive,
-    normalize,
-    render_inline,
-    render_list,
-    render_table,
+    write_if_changed,
 )
-
-DEFAULT_MIN_CHARS = 300  # 이보다 짧은 조각은 앞 조각에 합친다
-DEFAULT_MAX_CHARS = 4000  # 이보다 긴 h2 조각은 h3 기준으로 다시 나눈다
 
 # 출제할 내용이 없는 페이지를 본문으로 판별한다 (책 구조와 무관)
 MIN_PAGE_CHARS = 300  # 이보다 짧으면 안내·빈 페이지
@@ -75,13 +66,90 @@ CAPTION = re.compile(r"^(?:그림|표|figure|fig\.|table)\s*\d", re.IGNORECASE)
 logger = logging.getLogger("text_refine")
 
 
-@dataclass
-class Section:
-    headings: list[dict] = field(default_factory=list)  # {"level", "text", "anchor"}
-    blocks: list[dict] = field(default_factory=list)
+# ---------------------------------------------------------------- HTML 파싱
+# 수집 모듈(text_ingestion)에서 옮겨 왔다. raw HTML을 읽는 일은 정제 단계가 맡는다
 
-    def text(self) -> str:
-        return "\n\n".join(render_block(b) for b in self.blocks)
+# 본문(div.page-content) 안에 섞여 있는 노이즈
+NOISE_SELECTORS = ["div.ad-wrapper", "div.toc", "script", "ins", "style", "legend"]
+INLINE_WS = re.compile(r"[ \t\r\n]+")
+
+
+def extract_body(html: str) -> Tag:
+    soup = BeautifulSoup(html, "html.parser")
+    body = soup.select_one("div.page-content")
+    if body is None:
+        raise ValueError("본문(div.page-content)을 찾을 수 없음")
+    for selector in NOISE_SELECTORS:
+        for node in body.select(selector):
+            node.decompose()
+    return body
+
+
+def _image_placeholder(img: Tag) -> str:
+    alt = (img.get("alt") or "").strip()
+    name = alt or Path(img.get("src") or "").name or "image"
+    return f"[이미지: {name}]"
+
+
+def render_inline(node) -> str:
+    if isinstance(node, NavigableString):
+        return INLINE_WS.sub(" ", str(node))
+    if not isinstance(node, Tag):
+        return ""
+    if node.name == "br":
+        return "\n"
+    if node.name == "img":
+        return _image_placeholder(node)
+    inner = "".join(render_inline(c) for c in node.children)
+    if node.name == "code":
+        return f"`{inner.strip()}`"
+    if node.name in ("strong", "b"):
+        return f"**{inner.strip()}**" if inner.strip() else ""
+    return inner
+
+
+def _clean_lines(text: str) -> str:
+    return "\n".join(line.strip() for line in text.split("\n")).strip()
+
+
+def render_code(pre: Tag) -> str:
+    code = pre.find("code") or pre
+    lang = ""
+    for cls in code.get("class") or []:
+        if cls.startswith("language-"):
+            lang = cls.removeprefix("language-")
+    body = code.get_text().rstrip("\n")
+    return f"```{lang}\n{body}\n```"
+
+
+def render_list(lst: Tag, indent: int = 0) -> str:
+    lines = []
+    ordered = lst.name == "ol"
+    for i, li in enumerate(lst.find_all("li", recursive=False), start=1):
+        marker = f"{i}." if ordered else "-"
+        inline = []
+        nested = []
+        for child in li.children:
+            if isinstance(child, Tag) and child.name in ("ul", "ol"):
+                nested.append(render_list(child, indent + 1))
+            elif isinstance(child, Tag) and child.name == "pre":
+                nested.append(render_code(child))
+            else:
+                inline.append(render_inline(child))
+        lines.append(f"{'  ' * indent}{marker} {_clean_lines(''.join(inline))}")
+        lines.extend(nested)
+    return "\n".join(lines)
+
+
+def render_table(table: Tag) -> str:
+    rows = []
+    for tr in table.find_all("tr"):
+        cells = [
+            _clean_lines(render_inline(c)).replace("\n", " ")
+            for c in tr.find_all(["th", "td"])
+        ]
+        rows.append("| " + " | ".join(cells) + " |")
+    return "\n".join(rows)
 
 
 # ---------------------------------------------------------------- 블록 변환
@@ -233,59 +301,6 @@ def render_block(block: dict) -> str:
     return block["text"]
 
 
-# ---------------------------------------------------------------- 분할
-
-
-def split_at(blocks: list[dict], level: int, base: list[dict]) -> list[Section]:
-    """지정한 레벨의 제목에서 블록 목록을 나눈다."""
-    sections = [Section(headings=list(base))]
-    for block in blocks:
-        if block["type"] == "heading" and block["level"] == level:
-            sections.append(Section(headings=[*base, block]))
-        sections[-1].blocks.append(block)
-    return [s for s in sections if s.blocks]
-
-
-def chunk_page(blocks: list[dict], min_chars: int, max_chars: int) -> list[Section]:
-    sections: list[Section] = []
-    for section in split_at(blocks, 2, []):
-        if len(section.text()) > max_chars:
-            group = split_at(section.blocks, 3, section.headings)
-            sections.extend(merge_short(group, min_chars))
-        else:
-            sections.append(section)
-    # h2 하나가 통째로 짧은 경우만 h2 경계를 넘어 합친다
-    return merge_short(sections, min_chars)
-
-
-def _join(into: Section, other: Section, prepend: bool = False) -> None:
-    if prepend:
-        into.blocks[:0] = other.blocks
-        rest = [h for h in into.headings if h not in other.headings]
-        into.headings[:] = [*other.headings, *rest]
-    else:
-        into.blocks.extend(other.blocks)
-        into.headings.extend(h for h in other.headings if h not in into.headings)
-
-
-def merge_short(sections: list[Section], min_chars: int) -> list[Section]:
-    """짧은 조각을 합친다. 맨 앞(도입부)은 뒤 조각에, 나머지는 앞 조각에 붙인다."""
-    merged: list[Section] = []
-    carry: Section | None = None
-    for i, section in enumerate(sections):
-        if carry:
-            _join(section, carry, prepend=True)
-            carry = None
-        short = len(section.text()) < min_chars
-        if short and merged:
-            _join(merged[-1], section)
-        elif short and i < len(sections) - 1:
-            carry = section
-        else:
-            merged.append(section)
-    return merged
-
-
 # ---------------------------------------------------------------- 실행
 
 
@@ -329,15 +344,6 @@ def exclusion_reason(page: dict, body: Tag, rules: dict) -> str | None:
     return None
 
 
-def write_if_changed(path: Path, content: str) -> bool:
-    """내용이 바뀐 경우에만 기존 파일을 archive로 옮기고 새로 쓴다."""
-    if path.exists() and path.read_text(encoding="utf-8") == content:
-        return False
-    move_to_archive(path)
-    path.write_text(content, encoding="utf-8")
-    return True
-
-
 def _strip_private(block: dict) -> dict:
     clean = {k: v for k, v in block.items() if not k.startswith("_")}
     if "blocks" in clean:
@@ -345,35 +351,25 @@ def _strip_private(block: dict) -> dict:
     return clean
 
 
-def make_chunks(page: dict, body: Tag, min_chars: int, max_chars: int) -> list[dict]:
+def make_chunk(page: dict, body: Tag) -> dict | None:
+    """페이지 하나를 조각 하나로 만든다. 본문 블록이 없으면 None.
+
+    문단(A+) 단위가 소제목 경계를 스스로 처리하므로 조각을 더 나누지 않는다.
+    path는 페이지 경로(목차 breadcrumb)만 담는다: 페이지 관문이 페이지 단위로 동작한다.
+    """
     blocks = parse_blocks(body)
-    chunks = []
-    for n, section in enumerate(chunk_page(blocks, min_chars, max_chars), start=1):
-        text = normalize(section.text())
-        top = [h for h in section.headings if h["level"] == 2][:1]
-        sub = [h for h in section.headings if h["level"] == 3][:1]
-        # 가장 구체적인 제목(h3 > h2)의 앵커로 연결한다
-        anchor = next((h["anchor"] for h in [*sub, *top] if h["anchor"]), None)
-        url = f"{BASE_URL}/{page['id']}" + (f"#{anchor}" if anchor else "")
-        chunks.append(
-            {
-                "chunk_id": f"{page['id']}-{n:02d}",
-                "page_id": page["id"],
-                "book_id": page.get("book_id"),
-                "book_title": page.get("book_title"),
-                "page_title": page.get("title"),
-                "path": [*page.get("breadcrumb", []), *(h["text"] for h in top + sub)],
-                "headings": [h["text"] for h in section.headings],
-                "source_url": url,
-                "image_dependent": "[이미지:" in text,
-                "has_error_example": any("error" in b for b in section.blocks),
-                "blocks": [_strip_private(b) for b in section.blocks],
-                "text": text,
-                "char_count": len(text),
-                "content_hash": hashlib.sha256(text.encode("utf-8")).hexdigest(),
-            }
-        )
-    return chunks
+    if not blocks:
+        return None
+    return {
+        "chunk_id": f"{page['id']}-01",
+        "page_id": page["id"],
+        "book_id": page.get("book_id"),
+        "book_title": page.get("book_title"),
+        "page_title": page.get("title"),
+        "path": list(page.get("breadcrumb", [])),
+        "source_url": f"{BASE_URL}/{page['id']}",
+        "blocks": [_strip_private(b) for b in blocks],
+    }
 
 
 def load_pages(pages_file: Path) -> list[dict]:
@@ -387,11 +383,29 @@ def load_pages(pages_file: Path) -> list[dict]:
     return sorted(pages, key=lambda p: (p.get("order", -1), p["id"]))
 
 
-def refine_book(book_dir: Path, min_chars: int, max_chars: int) -> None:
+def is_up_to_date(book_dir: Path) -> bool:
+    """chunks.jsonl이 입력(pages.jsonl, refine_config.json)보다 새로우면 다시 정제할 필요가 없다.
+
+    raw HTML만 바뀐 경우는 알 수 없으니 그때는 force(--force, 파이프라인은 --rebuild)로 돌린다.
+    """
+    chunks_file = book_dir / "chunks.jsonl"
+    if not chunks_file.exists():
+        return False
+    built = chunks_file.stat().st_mtime
+    inputs = [book_dir / "pages.jsonl", CONFIG_FILE]
+    return all(p.stat().st_mtime <= built for p in inputs if p.exists())
+
+
+def refine_book(book_dir: Path, force: bool = False) -> None:
     pages_file = book_dir / "pages.jsonl"
     chunks_file = book_dir / "chunks.jsonl"
     excluded_file = book_dir / "excluded.json"
     raw_dir = book_dir / "raw"
+    if not force and is_up_to_date(book_dir):
+        logger.info(
+            "%s: 입력이 그대로라 정제를 건너뜀 (--force로 다시 정제)", book_dir.name
+        )
+        return
     rules = load_rules(book_dir.name)
 
     all_chunks: list[dict] = []
@@ -410,7 +424,8 @@ def refine_book(book_dir: Path, min_chars: int, max_chars: int) -> None:
                     {"id": page["id"], "title": page.get("title"), "reason": reason}
                 )
                 continue
-            all_chunks.extend(make_chunks(page, body, min_chars, max_chars))
+            if chunk := make_chunk(page, body):
+                all_chunks.append(chunk)
         except (OSError, UnicodeDecodeError, ValueError) as e:
             logger.warning("정제 실패 %s: %s", page["id"], e)
 
@@ -420,6 +435,8 @@ def refine_book(book_dir: Path, min_chars: int, max_chars: int) -> None:
     )
     content = "".join(json.dumps(c, ensure_ascii=False) + "\n" for c in all_chunks)
     changed = write_if_changed(chunks_file, content)
+    if not changed:
+        chunks_file.touch()  # 다음 실행에서 "입력보다 새로움"으로 판단하도록 시각을 갱신한다
     logger.info(
         "%s: 조각 %d개, 제외 페이지 %d개 (%s)%s",
         book_dir.name,
@@ -433,8 +450,9 @@ def refine_book(book_dir: Path, min_chars: int, max_chars: int) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="raw HTML을 퀴즈용 개념 조각으로 정제")
     parser.add_argument("--book-id", type=int, default=None, help="생략하면 모든 책")
-    parser.add_argument("--min-chars", type=int, default=DEFAULT_MIN_CHARS)
-    parser.add_argument("--max-chars", type=int, default=DEFAULT_MAX_CHARS)
+    parser.add_argument(
+        "--force", action="store_true", help="입력이 그대로여도 다시 정제"
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -448,7 +466,7 @@ def main() -> None:
         if not (book_dir / "pages.jsonl").exists():
             logger.error("pages.jsonl 없음: %s", book_dir)
             continue
-        refine_book(book_dir, args.min_chars, args.max_chars)
+        refine_book(book_dir, args.force)
 
 
 if __name__ == "__main__":

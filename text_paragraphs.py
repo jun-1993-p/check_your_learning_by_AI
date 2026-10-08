@@ -3,26 +3,29 @@
 설계: .idea_folder/정확도_2차_근거문장_인덱스_설계.md (0장). 문장·조각 단위 인덱스는 폐기했다.
 
 A+ 문단 = 설명 블록(paragraph, note, key_point, caption, concept_box, 연속한 list)과 바로 뒤의
-코드·실행 예시를 한 묶음(B)으로 보고, B를 같은 소제목 안에서 이웃과 합쳐 목표 길이(200자)까지
-키운 것이다 (상한 600자, 100자 미만의 짧은 꼬리는 앞 단위에 붙인다).
+코드·실행 예시·표를 한 묶음(B)으로 보고, B를 같은 소제목 안에서 이웃과 합쳐 목표 길이(200자)까지
+키운 것이다 (상한 600자, 100자 미만의 짧은 꼬리는 앞 단위에 붙인다). 제목 바로 뒤에 홀로 남은
+코드·표는 뒤따르는 설명에 붙여서(없으면 앞 단위나 단독 단위로) 어떤 문단에도 안 들어가는 블록이 없게 한다.
+제목(heading)과 소제목(subheading)은 문단 본문이 아니라 소제목 라벨과 URL 앵커로 쓰인다.
 소제목이 없는 구간은 페이지 제목으로 대체한다. 한 페이지에서 그렇게 대체한 단위가 여럿이면
 표시용 라벨을 "제목 - 1", "제목 - 2"로 구분한다. `[이미지: …]` 표시는 텍스트에서 빼고
 `has_image`, `figure_ref`("그림 N" 참조) 플래그로만 남긴다.
 
 저장:
-    .data/bookN/paragraphs.jsonl            문단 원본 (텍스트·소제목·URL·블록 범위·플래그)
     .data/vectorstore_paragraphs/           Chroma. 문단마다 벡터 하나 (embed_hash로 증분 갱신)
+문단 자체는 파일로 저장하지 않는다. chunks.jsonl에서 필요할 때 만든다 (책 전체에 약 0.1초).
+chunks.jsonl의 한 줄은 페이지 하나이고, 검색 단위(chunk)는 여기서 만드는 A+ 문단이다.
 
 사용 예:
-    python paragraphs.py                                  # 모든 책 증분 임베딩
-    python paragraphs.py --book-id 1                      # 특정 책만
-    python paragraphs.py --rebuild                        # 저장소를 archive로 옮기고 새로 생성
-    python paragraphs.py --query "변수" --book-id 110     # 문단 검색
+    python text_paragraphs.py                                  # 모든 책 증분 임베딩
+    python text_paragraphs.py --book-id 1                      # 특정 책만
+    python text_paragraphs.py --rebuild                        # 저장소를 archive로 옮기고 새로 생성
+    python text_paragraphs.py --query "변수" --book-id 110     # 문단 검색
 """
 
 import argparse
+import functools
 import hashlib
-import json
 import logging
 import os
 import re
@@ -47,10 +50,10 @@ from text_ingestion import DATA_ROOT, Paths, move_to_archive
 
 VECTORSTORE_DIR = DATA_ROOT / "vectorstore_paragraphs"
 COLLECTION_NAME = "paragraphs_bge-m3"
-PARAGRAPHS_FILE = "paragraphs.jsonl"
 UPSERT_BATCH_SIZE = 64
 
 EXPLAIN_BLOCKS = ("paragraph", "note", "key_point", "caption", "concept_box")
+ATTACH_BLOCKS = (*CODE_BLOCKS, "table")  # 설명에 붙는 자료
 MIN_UNIT_CHARS = 30
 PLUS_TARGET_CHARS = 200  # 이 길이가 될 때까지 이웃 단위를 합친다
 PLUS_MAX_CHARS = 600  # 합친 길이가 이를 넘으면 합치지 않는다
@@ -69,7 +72,7 @@ GATE_ALIASES = {
     "숫자형": ["숫자"],
 }
 
-logger = logging.getLogger("paragraphs")
+logger = logging.getLogger("text_paragraphs")
 
 
 # ---------------------------------------------------------------- 문단 만들기
@@ -112,16 +115,52 @@ def explain_ranges(blocks: list[dict]) -> list[tuple[int, int]]:
     return ranges
 
 
-def with_code(
+def attach_blocks(
     blocks: list[dict], ranges: list[tuple[int, int]]
 ) -> list[tuple[int, int]]:
-    """설명 범위마다 바로 뒤에 이어지는 코드·실행 예시 블록까지 넓힌다."""
+    """설명 범위에 코드·실행 예시·표를 붙여서 어떤 문단에도 안 들어가는 블록이 없게 한다.
+
+    1. 설명 바로 뒤에 이어지는 자료는 그 설명에 붙인다.
+    2. 제목 바로 뒤처럼 홀로 남은 자료는 바로 뒤따르는 설명에 붙인다 (앞쪽으로 넓힌다).
+    3. 뒤따르는 설명이 없으면, 사이에 소제목만 있는 바로 앞 단위에 붙인다.
+    4. 그것도 없으면 단독 단위로 둔다 (MIN_UNIT_CHARS 미만이면 build_units에서 버린다).
+    """
     result = []
     for start, end in ranges:
-        while end < len(blocks) and blocks[end]["type"] in CODE_BLOCKS:
+        while end < len(blocks) and blocks[end]["type"] in ATTACH_BLOCKS:
             end += 1
         result.append((start, end))
-    return result
+    covered = {i for start, end in result for i in range(start, end)}
+
+    i = 0
+    while i < len(blocks):
+        if blocks[i]["type"] not in ATTACH_BLOCKS or i in covered:
+            i += 1
+            continue
+        j = i
+        while (
+            j < len(blocks) and blocks[j]["type"] in ATTACH_BLOCKS and j not in covered
+        ):
+            j += 1
+        following = next((k for k, (s, _) in enumerate(result) if s == j), None)
+        previous = max(
+            (
+                k
+                for k, (_, e) in enumerate(result)
+                if e <= i
+                and all(blocks[m]["type"] == "subheading" for m in range(e, i))
+            ),
+            key=lambda k: result[k][1],
+            default=None,
+        )
+        if following is not None:
+            result[following] = (i, result[following][1])
+        elif previous is not None:
+            result[previous] = (result[previous][0], j)
+        else:
+            result.append((i, j))
+        i = j
+    return sorted(result)
 
 
 def merge_short(
@@ -175,7 +214,7 @@ def build_units(chunk: dict) -> list[dict]:
     """조각의 A+ 문단 목록. 각 문단은 블록 범위(block_start, block_end)를 갖는다."""
     blocks = chunk["blocks"]
     secs = sections(blocks)
-    ranges = merge_short(blocks, secs, with_code(blocks, explain_ranges(blocks)))
+    ranges = merge_short(blocks, secs, attach_blocks(blocks, explain_ranges(blocks)))
     # 조각 path의 끝은 조각의 첫 소제목이라 페이지 제목이 아니다. 페이지 제목을 쓴다
     title = chunk.get("page_title") or (chunk.get("path") or [""])[-1]
 
@@ -190,7 +229,8 @@ def build_units(chunk: dict) -> list[dict]:
         body = embed_text(title, section, chosen)
         units.append(
             {
-                "unit_id": f"{chunk['chunk_id']}#g{len(units) + 1:03d}",
+                # 블록 위치로 만든다: 앞에 문단이 끼어도 뒤 문단의 id가 밀리지 않는다
+                "unit_id": f"{chunk['chunk_id']}#b{start:03d}",
                 "chunk_id": chunk["chunk_id"],
                 "page_id": chunk.get("page_id"),
                 "book_id": chunk.get("book_id"),
@@ -218,20 +258,33 @@ def build_units(chunk: dict) -> list[dict]:
 # ---------------------------------------------------------------- 저장소
 
 
-def get_collection():
+def get_collection(store_dir: Path = VECTORSTORE_DIR):
     # 순수 Python protobuf 구현으로 우회한다 (conda-forge chromadb의 opentelemetry-proto 호환 문제)
     os.environ.setdefault("PROTOCOL_BUFFERS_PYTHON_IMPLEMENTATION", "python")
     import chromadb
     from chromadb.config import Settings
 
     client = chromadb.PersistentClient(
-        path=str(VECTORSTORE_DIR),
+        path=str(store_dir),
         settings=Settings(anonymized_telemetry=False),  # 외부 전송 차단
     )
     return client.get_or_create_collection(
         COLLECTION_NAME,
         metadata={"hnsw:space": "cosine", "embed_model": MODEL_NAME},
     )
+
+
+def read_embeddings(store_dir: Path) -> dict[str, list[float]]:
+    """저장소의 벡터를 임베딩 텍스트 해시로 찾을 수 있게 읽는다.
+
+    --rebuild로 옛 저장소를 archive로 옮긴 뒤, 임베딩 텍스트가 그대로인 문단의 벡터를
+    다시 계산하지 않고 재사용하는 데 쓴다. 텍스트가 같으면 벡터도 같다.
+    """
+    got = get_collection(store_dir).get(include=["embeddings", "metadatas"])
+    return {
+        m["embed_hash"]: list(map(float, vec))
+        for vec, m in zip(got["embeddings"], got["metadatas"])
+    }
 
 
 def metadata(row: dict, source_dir: str) -> dict:
@@ -248,19 +301,24 @@ def metadata(row: dict, source_dir: str) -> dict:
     }
 
 
-def write_rows(path: Path, rows: list[dict]) -> bool:
-    """내용이 바뀐 때만 쓴다. 바뀌었으면 True."""
-    content = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows)
-    if path.exists() and path.read_text(encoding="utf-8") == content:
-        return False
-    path.write_text(content, encoding="utf-8")
-    return True
+def load_units(book_dir: Path) -> list[dict]:
+    """책 폴더의 chunks.jsonl에서 A+ 문단을 만든다 (책 전체에 약 0.1초)."""
+    return [u for c in load_chunks(book_dir / "chunks.jsonl") for u in build_units(c)]
 
 
-def index_book(book_dir: Path, collection, model) -> None:
-    """chunks.jsonl → paragraphs.jsonl → 벡터 저장소. 임베딩 텍스트가 바뀐 문단만 다시 임베딩한다."""
-    rows = [u for c in load_chunks(book_dir / "chunks.jsonl") for u in build_units(c)]
-    changed = write_rows(book_dir / PARAGRAPHS_FILE, rows)
+def index_book(
+    book_dir: Path,
+    collection,
+    get_model,
+    reuse: dict[str, list[float]] | None = None,
+) -> None:
+    """chunks.jsonl → 문단 → 벡터 저장소. 임베딩 텍스트가 바뀐 문단만 다시 임베딩한다.
+
+    get_model은 모델을 돌려주는 함수다. 새로 임베딩할 문단이 있을 때만 불러서,
+    바뀐 게 없는 실행은 모델 로딩(약 13초)을 건너뛴다. reuse는 임베딩 텍스트 해시 →
+    기존 벡터로, 있으면 모델을 거치지 않고 그 벡터를 쓴다 (read_embeddings 참고).
+    """
+    rows = load_units(book_dir)
 
     got = collection.get(where={"source_dir": book_dir.name}, include=["metadatas"])
     existing = {
@@ -274,27 +332,46 @@ def index_book(book_dir: Path, collection, model) -> None:
             book_dir.name,
             len(stale),
         )
+    reuse = reuse or {}
+    n_reuse = sum(r["embed_hash"] in reuse for r in todo)
     logger.info(
-        "%s: 문단 %d개 (%s), 새로 임베딩 %d개",
+        "%s: 문단 %d개, 저장할 것 %d개 (벡터 재사용 %d, 새로 임베딩 %d)",
         book_dir.name,
         len(rows),
-        "paragraphs.jsonl 갱신" if changed else "paragraphs.jsonl 그대로",
         len(todo),
+        n_reuse,
+        len(todo) - n_reuse,
     )
     if not todo:
         return
-    too_long = [
-        r["unit_id"]
-        for r in todo
-        if len(model.tokenizer(r["embed_text"])["input_ids"]) > MAX_SEQ_LENGTH
-    ]
-    if too_long:
-        logger.warning("%d토큰 초과로 잘리는 문단: %s", MAX_SEQ_LENGTH, too_long)
+    model = None
     for start in range(0, len(todo), UPSERT_BATCH_SIZE):
         batch = todo[start : start + UPSERT_BATCH_SIZE]
+        fresh = [r for r in batch if r["embed_hash"] not in reuse]
+        if fresh:
+            model = model or get_model()
+            too_long = [
+                r["unit_id"]
+                for r in fresh
+                if len(model.tokenizer(r["embed_text"])["input_ids"]) > MAX_SEQ_LENGTH
+            ]
+            if too_long:
+                logger.warning(
+                    "%d토큰 초과로 잘리는 문단: %s", MAX_SEQ_LENGTH, too_long
+                )
+            vectors = dict(
+                zip(
+                    (r["unit_id"] for r in fresh),
+                    embed(model, [r["embed_text"] for r in fresh]),
+                )
+            )
+        else:
+            vectors = {}
         collection.upsert(
             ids=[r["unit_id"] for r in batch],
-            embeddings=embed(model, [r["embed_text"] for r in batch]),
+            embeddings=[
+                vectors.get(r["unit_id"]) or reuse[r["embed_hash"]] for r in batch
+            ],
             documents=[r["embed_text"] for r in batch],
             metadatas=[metadata(r, book_dir.name) for r in batch],
         )
@@ -326,13 +403,13 @@ def page_gate(concept: str, hits: list[dict]) -> list[dict]:
 
 
 class ParagraphIndex:
-    """개념·질문에 맞는 문단을 점수순으로 찾는다. 문단 원본은 책별 paragraphs.jsonl에서 읽는다."""
+    """개념·질문에 맞는 문단을 점수순으로 찾는다. 문단은 책별 chunks.jsonl에서 그때그때 만든다."""
 
     def __init__(self, model=None, collection=None, chunk_index=None):
         self.model = model or load_model()
         self.collection = collection or get_collection()
         self._chunk_index = chunk_index
-        self._rows: dict[int, dict[str, dict]] = {}
+        self._rows: dict[str, dict[str, dict]] = {}
 
     @property
     def chunk_index(self) -> dict[str, dict]:
@@ -340,14 +417,17 @@ class ParagraphIndex:
             self._chunk_index = load_chunk_index()
         return self._chunk_index
 
-    def rows(self, book_id: int) -> dict[str, dict]:
-        if book_id not in self._rows:
-            path = Paths.for_book(book_id).book_dir / PARAGRAPHS_FILE
-            if not path.exists():
-                raise FileNotFoundError(f"{path} 없음 (먼저 python paragraphs.py 실행)")
-            with path.open(encoding="utf-8") as f:
-                self._rows[book_id] = {r["unit_id"]: r for r in map(json.loads, f) if r}
-        return self._rows[book_id]
+    def rows_in(self, source_dir: str) -> dict[str, dict]:
+        """폴더 이름(book1, unbound 등)으로 찾는다. book_id가 없는 책도 같은 방식으로 읽는다."""
+        if source_dir not in self._rows:
+            book_dir = DATA_ROOT / source_dir
+            if not (book_dir / "chunks.jsonl").exists():
+                raise FileNotFoundError(f"{book_dir / 'chunks.jsonl'} 없음 (먼저 정제)")
+            self._rows[source_dir] = {u["unit_id"]: u for u in load_units(book_dir)}
+        return self._rows[source_dir]
+
+    def rows(self, book_id: int | None) -> dict[str, dict]:
+        return self.rows_in(Paths.for_book(book_id).book_dir.name)
 
     def find(
         self,
@@ -369,7 +449,7 @@ class ParagraphIndex:
         ):
             if unit_id in exclude:
                 continue
-            row = self.rows(meta["book_id"]).get(unit_id)
+            row = self.rows_in(meta["source_dir"]).get(unit_id)
             if row is None:  # 규칙이 바뀌어 남은 옛 벡터
                 continue
             if row["embed_hash"] != meta.get("embed_hash"):
@@ -425,7 +505,7 @@ def main() -> None:
     parser.add_argument(
         "--rebuild",
         action="store_true",
-        help="저장소를 archive로 옮기고 새로 생성",
+        help="저장소를 archive로 옮기고 새로 생성 (임베딩 텍스트가 같은 문단은 벡터를 재사용)",
     )
     parser.add_argument("--query", help="인덱스 갱신 대신 문단 검색")
     parser.add_argument("--top", type=int, default=10)
@@ -442,19 +522,21 @@ def main() -> None:
             print(f"{n:>3}. {unit['score']:.3f} [{unit['section']}] {text}")
         return
 
+    reuse = None
     if args.rebuild:
-        move_to_archive(VECTORSTORE_DIR)
+        archived = move_to_archive(VECTORSTORE_DIR)
+        reuse = read_embeddings(archived) if archived else None
     if args.book_id is not None:
         book_dirs = [Paths.for_book(args.book_id).book_dir]
     else:
         book_dirs = sorted(p.parent for p in DATA_ROOT.glob("*/chunks.jsonl"))
-    model = load_model()
+    get_model = functools.cache(load_model)  # 책이 여러 권이어도 한 번만 불러온다
     collection = get_collection()
     for book_dir in book_dirs:
         if not (book_dir / "chunks.jsonl").exists():
             logger.error("chunks.jsonl 없음: %s (먼저 text_refine.py 실행)", book_dir)
             continue
-        index_book(book_dir, collection, model)
+        index_book(book_dir, collection, get_model, reuse)
 
 
 if __name__ == "__main__":

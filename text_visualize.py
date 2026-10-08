@@ -9,10 +9,10 @@
 show/heatmap/similarity의 대상 고르기 (하나만 지정, 없으면 --book-id·--limit 범위):
     --query "질문"   검색 상위 문단 + 질의 벡터 (질의는 맨 위 행)
     --page-id 13     한 페이지의 문단들
-    --ids 13-17#g001 13-17#g002
+    --ids 13-01#b000 13-01#b010   (문단 id = {페이지}-01#b{시작 블록 번호})
 
 사용 예:
-    python text_visualize.py show --ids 13-17#g001 13-17#g002 --n 10
+    python text_visualize.py show --ids 13-01#b000 13-01#b010 --n 10
     python text_visualize.py show --page-id 13 --csv .data/inspect/page13.csv
     python text_visualize.py heatmap --query "문자열 공백 제거" --open
     python text_visualize.py heatmap --page-id 13 --sort-dims --dims 64
@@ -28,8 +28,8 @@ from pathlib import Path
 
 import numpy as np
 
-from paragraphs import ParagraphIndex, get_collection
 from text_embed import DATA_ROOT, embed, load_model
+from text_paragraphs import ParagraphIndex, get_collection
 
 OUT_DIR = DATA_ROOT / "inspect"
 SNIPPET_CHARS = 160

@@ -3,7 +3,7 @@
 설계: .idea_folder/정확도_2차_근거문장_인덱스_설계.md (0장). 문장 방식과 단위 A·B는 폐기했다.
 
 케이스(책, 개념)마다 on·off 한 번씩 문제를 만든다.
-- on : paragraphs.ParagraphIndex.find()의 점수순 A+ 문단을 1위부터 LLM에 한 문단씩 준다.
+- on : text_paragraphs.ParagraphIndex.find()의 점수순 A+ 문단을 1위부터 LLM에 한 문단씩 준다.
        LLM은 문단에 기반해 새 문장(빈칸 `____` 포함)과 정답을 쓰거나 사유와 함께 거부한다.
        거부되면 다음 순위로 (최대 --max-tries번), 처음 출제된 문단 하나를 그 개념의 근거로
        쓴다. 이미 쓴 문단은 이후 케이스에서 뺀다. 5번 모두 거부되면 "전부 거부"로 끝낸다.
@@ -53,7 +53,7 @@ import numpy as np
 from dotenv import load_dotenv
 from groq import APIError, Groq, RateLimitError
 
-import text_answer as ta
+import quiz_session as qs
 from eval_common import (
     CASES_CSV,
     DEFAULT_EVAL_MODEL,
@@ -66,8 +66,8 @@ from eval_common import (
     parse_book_id,
     titles_by_book_id,
 )
-from paragraphs import ParagraphIndex, get_collection
 from text_embed import embed, load_chunk_index, load_model
+from text_paragraphs import ParagraphIndex, get_collection
 
 BLANK = "____"
 MAX_TRIES = 5
@@ -277,7 +277,7 @@ def call_json(client, model: str, system: str, user: str, schema: dict) -> dict:
     options = model_options(model)
     max_tokens = options.pop("max_tokens")
     try:
-        text = ta.chat(
+        text = qs.chat(
             client,
             [{"role": "system", "content": system}, {"role": "user", "content": user}],
             TEMPERATURE,
@@ -290,7 +290,7 @@ def call_json(client, model: str, system: str, user: str, schema: dict) -> dict:
         if "per day" in str(e):
             raise DailyLimitReached(str(e)) from e
         raise
-    match = ta.JSON_OBJECT.search(text)
+    match = qs.JSON_OBJECT.search(text)
     if not match:
         raise ValueError(f"JSON 없음: {text[:120]}")
     return json.loads(match.group())  # JSONDecodeError는 ValueError의 하위 클래스

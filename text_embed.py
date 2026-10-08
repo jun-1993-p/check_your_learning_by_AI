@@ -1,6 +1,6 @@
 """임베딩 공용: bge-m3 모델 불러오기·임베딩, chunks.jsonl 읽기, 블록 텍스트 변환.
 
-벡터 저장소와 검색은 문단 단위로 paragraphs.py가 맡는다 (조각·소제목·부분 단위의 옛 임베딩은 폐기).
+벡터 저장소와 검색은 문단 단위로 text_paragraphs.py가 맡는다 (조각·소제목·부분 단위의 옛 임베딩은 폐기).
 """
 
 import json
@@ -9,7 +9,7 @@ import os
 import re
 from pathlib import Path
 
-from text_ingestion import DATA_ROOT  # noqa: F401  (다른 모듈이 여기서 가져다 쓴다)
+from text_ingestion import DATA_ROOT
 
 MODEL_NAME = "BAAI/bge-m3"
 MAX_SEQ_LENGTH = 2048  # 문단 단위는 이보다 훨씬 짧다 (bge-m3 최대 8192)
