@@ -1,6 +1,6 @@
 """질문에 답하고 바로 확인 퀴즈를 낸다: 문단 검색 → 답변 → 문단마다 문제 하나씩 → 풀이.
 
-흐름 (Groq LLM):
+흐름 (LLM은 llm_groq.py 또는 llm_nvidia.py. .env의 LLM_PROVIDER로 고른다):
     1. 질문과 가까운 A+ 문단을 찾는다 (text_paragraphs.ParagraphIndex).
     2. 문단에만 근거해 답하고, 답변이 인용한 문단을 고른다.
     3. 퀴즈는 모든 유형(O/X, 빈칸, 4지선다, 단답형)을 같은 방식으로 만든다: 문단 하나를 주고
@@ -14,8 +14,11 @@
 퀴즈 유형별 스키마·검증·채점은 quiz_templates.py에 있다.
 
 .env:
+    LLM_PROVIDER=groq   # groq(기본) 또는 nvidia. 바꾸려면 이 값만 고친다
     GROQ_API_KEY=...
-    GROQ_MODEL=qwen/qwen3.8-27b   # 선택. 생략하면 기본값
+    GROQ_MODEL=...      # LLM_PROVIDER=groq일 때 필수
+    NVIDIA_API_KEY=...
+    NVIDIA_MODEL=...    # LLM_PROVIDER=nvidia일 때 필수 (그 밖의 선택 항목은 llm_nvidia.py 참고)
 
 사용 예:
     python quiz_session.py "문자열 공백 제거는 어떻게 해?"
@@ -26,6 +29,7 @@
 """
 
 import argparse
+import importlib
 import json
 import logging
 import os
@@ -40,7 +44,24 @@ import quiz_templates as qt
 from text_embed import load_chunk_index, load_model
 from text_paragraphs import ParagraphIndex, get_collection
 
-DEFAULT_MODEL = "qwen/qwen3.8-27b"
+# LLM 호출 파일. 둘은 같은 이름·인터페이스를 가져서 .env의 LLM_PROVIDER만 바꾸면 갈아 끼운다.
+# 이 모듈을 불러오는 쪽(eval_blank.py 등)이 main보다 먼저 쓰므로 여기서 .env를 읽는다
+LLM_PROVIDERS = {"groq": "llm_groq", "nvidia": "llm_nvidia"}
+load_dotenv(override=True)
+_provider = os.getenv("LLM_PROVIDER", "groq").strip().lower()
+if _provider not in LLM_PROVIDERS:
+    raise SystemExit(
+        f"LLM_PROVIDER={_provider!r}는 지원하지 않습니다. 사용 가능: {', '.join(LLM_PROVIDERS)}"
+    )
+llm = importlib.import_module(LLM_PROVIDERS[_provider])
+APIError = llm.APIError
+APIConnectionError = llm.APIConnectionError
+APIStatusError = llm.APIStatusError
+RateLimitError = llm.RateLimitError
+BadRequestError = llm.BadRequestError
+get_client = llm.get_client
+get_model = llm.get_model
+
 ANSWER_TEMPERATURE = 0.2
 QUIZ_TEMPERATURE = 0.5
 # Groq 무료 등급은 분당 출력 토큰이 1,000개라, 요청마다 상한을 명시해야 거절되지 않는다
@@ -59,8 +80,22 @@ PAGE_POOL_TOP = 5  # (나) 질문과 가까운 상위 몇 개 중에서 랜덤�
 PAGE_POOL_MIN_CHARS = 120  # (나) 너무 짧은 문단은 문제를 만들 재료가 못 된다
 SLOT_TRIES = 3  # 문제 하나를 위해 문단을 바꿔 가며 시도하는 최대 횟수
 CALL_RETRIES = 1  # JSON 생성 오류(json_validate_failed)일 때 같은 문단으로 다시 시도
+MAX_FORMAT_CANDS = 10  # 유형을 한 번에 고르는 문단 수 상한 (넘는 문단은 허용 유형을 돌아가며 쓴다)
+FORMAT_CHOICE_CHARS = 400  # 유형 고르기 프롬프트에 넣는 문단 앞부분 글자 수
+FORMAT_CHOICE_MAX_TOKENS = 300
+FORMAT_CHOICE_GUIDE = {
+    "ox": "참/거짓이 분명한 규칙·성질 (거짓 진술은 맞는 문장의 한 곳만 바꿔 만든다)",
+    "blank": "용어·명칭을 정의하는 문장 (핵심 용어 하나를 가릴 수 있다)",
+    "mcq": "비슷한 개념과의 구분, 조건별 차이, 결과 비교 (그럴듯한 오답을 만들 수 있다)",
+    "short": "함수·문법의 이름이나 짧은 표현 하나가 정답인 내용",
+}
+FORMAT_CHOICE_SYSTEM = """너는 퀴즈 출제자야. 아래 [번호] 문단마다 문제로 만들기에 가장 어울리는 유형을 하나씩 골라.
+- 문단의 내용이 그 유형의 문제로 자연스럽게 만들어져야 해.
+- 퀴즈 전체에서 한 유형으로 쏠리지 않게 문단 사이에 유형을 섞어.
+유형:
+{formats}
+문단 번호 순서대로 {"formats": [{"no": 1, "format": "유형"}, ...]} 형태의 JSON 객체 하나만 출력해."""
 
-THINK_TAG = re.compile(r"<think>.*?</think>", re.DOTALL)
 JSON_OBJECT = re.compile(r"\{.*\}", re.DOTALL)
 CITATION = re.compile(r"\[(\d+)\]")
 
@@ -183,15 +218,6 @@ def format_sources(sources: list[Source]) -> str:
 # ---------------------------------------------------------------- LLM
 
 
-def get_client():
-    from groq import Groq
-
-    api_key = os.getenv("GROQ_API_KEY")
-    if not api_key:
-        raise SystemExit(".env에 GROQ_API_KEY가 없습니다")
-    return Groq(api_key=api_key)
-
-
 def chat(
     client,
     messages: list[dict],
@@ -201,31 +227,12 @@ def chat(
     model: str | None = None,
     **extra,
 ) -> str:
-    """LLM 호출은 모두 여기를 거친다. 로컬 모델로 바꿀 때 이 함수만 교체하면 된다.
+    """LLM 호출은 모두 여기를 거친다. 실제 호출은 고른 provider(llm_groq / llm_nvidia)가 한다.
 
-    model을 주지 않으면 .env의 GROQ_MODEL(없으면 기본값)을 쓴다.
+    model을 주지 않으면 provider의 .env 모델(GROQ_MODEL / NVIDIA_MODEL)을 쓴다 (없으면 종료).
     extra는 모델별 옵션(예: 추론 모델의 reasoning_effort)으로 그대로 넘긴다.
     """
-    options = dict(extra)
-    if schema is not None:
-        # strict가 아니면 Groq는 생성을 제한하지 않고 생성 후 검사만 해서,
-        # 모델이 스키마를 무시하면 400(json_validate_failed)으로 통째로 거절된다
-        options["response_format"] = {
-            "type": "json_schema",
-            "json_schema": {"name": "quiz", "schema": schema, "strict": True},
-        }
-    response = client.chat.completions.create(
-        model=model or os.getenv("GROQ_MODEL", DEFAULT_MODEL),
-        messages=messages,
-        temperature=temperature,
-        max_tokens=max_tokens,
-        **options,
-    )
-    choice = response.choices[0]
-    if choice.finish_reason == "length":
-        logger.warning("출력이 max_tokens(%d)에서 잘렸습니다", max_tokens)
-    # 추론 모델이 생각 과정을 본문에 섞어 내보내는 경우를 걸러낸다
-    return THINK_TAG.sub("", choice.message.content or "").strip()
+    return llm.chat(client, messages, temperature, max_tokens, schema, model, **extra)
 
 
 def answer(client, question: str, sources: list[Source]) -> str:
@@ -294,25 +301,95 @@ def same_page_pool(
     return [candidate_from_unit(u) for u in [*top, *rest]]
 
 
-def plan_slots(
-    counts: dict[str, int], pool_page_size: int, rng: random.Random
-) -> list[tuple[str, str]]:
-    """문제마다 (유형, 문단 출처). 전체의 약 1/3을 같은 페이지의 다른 문단에서 낸다."""
-    formats = [fmt for fmt, n in counts.items() for _ in range(n)]
-    total = len(formats)
+def plan_slots(total: int, pool_page_size: int, rng: random.Random) -> list[str]:
+    """문제마다 문단 출처. 전체의 약 1/3을 같은 페이지의 다른 문단에서 낸다."""
     n_page = 0 if total < 2 else min(round(total / 3), pool_page_size)
     page_slots = set(rng.sample(range(total), n_page)) if n_page else set()
-    return [
-        (fmt, ORIGIN_PAGE if i in page_slots else ORIGIN_CITED)
-        for i, fmt in enumerate(formats)
+    return [ORIGIN_PAGE if i in page_slots else ORIGIN_CITED for i in range(total)]
+
+
+# ---------------------------------------------------------------- 퀴즈: 유형 고르기
+
+
+def format_choice_schema(allowed: list[str]) -> dict:
+    item = {
+        "type": "object",
+        "properties": {
+            "no": {"type": "integer"},
+            "format": {"type": "string", "enum": allowed},
+        },
+        "required": ["no", "format"],
+        "additionalProperties": False,
+    }
+    return {
+        "type": "object",
+        "properties": {"formats": {"type": "array", "items": item}},
+        "required": ["formats"],
+        "additionalProperties": False,
+    }
+
+
+def choose_formats(
+    client, question: str, cands: list[dict], allowed: list[str]
+) -> dict[str, str]:
+    """문단마다 어울리는 문제 유형을 LLM이 한 번에 고른다. {unit_id: 유형}.
+
+    허용 유형이 하나뿐이면 호출하지 않는다. 호출이 실패하거나 응답이 어긋난 문단은 빠지고,
+    make_quiz가 허용 유형을 돌아가며 채운다.
+    """
+    if len(allowed) == 1 or not cands:
+        return {c["unit_id"]: allowed[0] for c in cands}
+
+    listing = "\n\n".join(
+        f"[{n}] {c['text'][:FORMAT_CHOICE_CHARS]}" for n, c in enumerate(cands, 1)
+    )
+    labels = "\n".join(f"- {f}: {FORMAT_CHOICE_GUIDE[f]}" for f in allowed)
+    messages = [
+        {"role": "system", "content": FORMAT_CHOICE_SYSTEM.replace("{formats}", labels)},
+        {"role": "user", "content": f"[학습자 질문]\n{question}\n\n{listing}"},
     ]
+    try:
+        text = chat(
+            client,
+            messages,
+            ANSWER_TEMPERATURE,
+            FORMAT_CHOICE_MAX_TOKENS,
+            format_choice_schema(allowed),
+        )
+        match = JSON_OBJECT.search(text)
+        picks = json.loads(match.group())["formats"] if match else []
+    except (BadRequestError, json.JSONDecodeError, KeyError) as e:
+        logger.warning("유형 고르기 실패, 허용 유형을 돌아가며 씁니다: %s", e)
+        return {}
+    chosen = {}
+    for p in picks:
+        no, fmt = p.get("no"), p.get("format")
+        if isinstance(no, int) and 1 <= no <= len(cands) and fmt in allowed:
+            chosen[cands[no - 1]["unit_id"]] = fmt
+    logger.info("LLM이 고른 유형: %s", list(chosen.values()))
+    return chosen
+
+
+def pick_format(
+    cand: dict,
+    chosen: dict[str, str],
+    allowed: list[str],
+    done: dict[str, set[str]],
+    n_made: int,
+) -> str:
+    """이 문단의 유형. LLM이 고른 것을 쓰되, 같은 문단에서 이미 낸 유형이면 다른 허용 유형으로 바꾼다."""
+    uid = cand["unit_id"]
+    fmt = chosen.get(uid) or allowed[n_made % len(allowed)]
+    if fmt in done.get(uid, set()):
+        fmt = next((f for f in allowed if f not in done[uid]), fmt)
+    return fmt
 
 
 # ---------------------------------------------------------------- 퀴즈: 문제 만들기
 
 
 def failed_generation(error, limit: int = 400) -> str:
-    """Groq가 스키마 검사에서 거절한 모델 출력의 앞부분. 실패 원인 파악용."""
+    """서버가 스키마 검사에서 거절한 모델 출력의 앞부분(Groq의 failed_generation). 실패 원인 파악용."""
     body = getattr(error, "body", None)
     detail = body.get("error", body) if isinstance(body, dict) else {}
     text = str(detail.get("failed_generation", "")) if isinstance(detail, dict) else ""
@@ -341,15 +418,13 @@ def quiz_messages(
 
 def ask_quiz(client, fmt: str, messages: list[dict]) -> dict:
     """LLM에 문제 하나를 요청해 JSON으로 읽는다. 형식이 어긋나면 QuizFormatError."""
-    from groq import BadRequestError
-
     schema = qt.build_schema(fmt)
     for attempt in range(CALL_RETRIES + 1):
         try:
             text = chat(client, messages, QUIZ_TEMPERATURE, QUIZ_MAX_TOKENS, schema)
         except BadRequestError as e:
             # 모델 출력이 스키마 검사에 걸린 경우만 재시도한다. 그 밖의 400은 그대로 올린다
-            if "json_validate_failed" not in str(e):
+            if not llm.is_schema_error(e):
                 raise
             logger.warning(
                 "퀴즈 스키마 검사 실패 (%d회차). 거절된 출력: %s",
@@ -397,11 +472,13 @@ def make_quiz(
     question: str,
     cited: list[Source],
     index: ParagraphIndex,
-    counts: dict[str, int],
+    total: int,
+    allowed: list[str],
     rng: random.Random | None = None,
 ) -> list[dict]:
-    """유형별 개수(counts)만큼 문제를 만든다. 문제마다 문단 하나에서 LLM 호출 한 번이 기본이다.
+    """total개 문제를 만든다. 문제 유형은 allowed 안에서 LLM이 문단마다 고른다.
 
+    문제마다 문단 하나에서 LLM 호출 한 번이 기본이고, 유형 고르기에 퀴즈 전체로 한 번이 더 든다.
     거부되거나 검증에 실패하면 같은 출처의 다음 문단(없으면 다른 출처)으로 최대 SLOT_TRIES번 시도한다.
     """
     rng = rng or random.Random()
@@ -409,36 +486,46 @@ def make_quiz(
         ORIGIN_CITED: [candidate_from_source(s) for s in cited],
         ORIGIN_PAGE: same_page_pool(index, question, cited, rng),
     }
-    slots = plan_slots(counts, len(pools[ORIGIN_PAGE]), rng)
+    slots = plan_slots(total, len(pools[ORIGIN_PAGE]), rng)
+    cands = [*pools[ORIGIN_CITED], *pools[ORIGIN_PAGE]][:MAX_FORMAT_CANDS]
+    chosen = choose_formats(client, question, cands, allowed)
     used: Counter[str] = Counter()  # 문단을 골고루 쓰려고 쓴 횟수가 적은 것부터 고른다
+    done: dict[str, set[str]] = {}  # 문단마다 이미 낸 유형
+    rejected: set[str] = set()  # LLM이 거부한 문단
     quiz: list[dict] = []
     previous: list[str] = []
 
-    for fmt, origin in slots:
+    for origin in slots:
         other = ORIGIN_PAGE if origin == ORIGIN_CITED else ORIGIN_CITED
         order = [
-            *sorted(pools[origin], key=lambda c: used[c["unit_id"]]),
-            *sorted(pools[other], key=lambda c: used[c["unit_id"]]),
+            c
+            for c in (
+                *sorted(pools[origin], key=lambda c: used[c["unit_id"]]),
+                *sorted(pools[other], key=lambda c: used[c["unit_id"]]),
+            )
+            if c["unit_id"] not in rejected  # LLM이 문단 자체를 거부했으면 다시 시키지 않는다
         ]
         for cand in order[:SLOT_TRIES]:
+            fmt = pick_format(cand, chosen, allowed, done, len(quiz))
             q, reason = try_question(client, fmt, question, cand, previous)
             if q is None:
                 logger.info("[%s] %s 문단 실패: %s", fmt, cand["origin"], reason)
+                if reason.startswith("거부("):
+                    rejected.add(cand["unit_id"])
                 continue
             used[cand["unit_id"]] += 1
+            done.setdefault(cand["unit_id"], set()).add(fmt)
             previous.append(q.get("statement") or q["question"])
             quiz.append(q)
             break
         else:
-            logger.warning("%s 문제를 만들지 못함 (%d번 시도)", fmt, SLOT_TRIES)
+            logger.warning("문제를 만들지 못함 (%d번 시도)", SLOT_TRIES)
 
     for q in quiz:
         if q["format"] == "mcq":
             qt.shuffle_mcq(q, rng)
-    if len(quiz) < sum(counts.values()):
-        logger.warning(
-            "요청 %d문제 중 %d문제만 만들었습니다", sum(counts.values()), len(quiz)
-        )
+    if len(quiz) < total:
+        logger.warning("요청 %d문제 중 %d문제만 만들었습니다", total, len(quiz))
     logger.info(
         "퀴즈 %d문제: %s",
         len(quiz),
@@ -493,8 +580,8 @@ def parse_formats(value: str) -> list[str]:
 
 
 def main() -> None:
-    load_dotenv()
-    parser = argparse.ArgumentParser(description="RAG 기반 답변 + 확인 퀴즈 (Groq)")
+    load_dotenv(override=True)
+    parser = argparse.ArgumentParser(description=f"RAG 기반 답변 + 확인 퀴즈 ({llm.NAME})")
     parser.add_argument("question")
     parser.add_argument("--k", type=int, default=5, help="근거 후보 문단 수 (최대)")
     parser.add_argument("--book-id", type=int, default=None, help="검색할 책 제한")
@@ -507,12 +594,11 @@ def main() -> None:
     parser.add_argument(
         "--formats",
         type=parse_formats,
-        default=list(qt.FORMATS),
-        help=f"퀴즈 유형 (쉼표로 구분, 기본: {','.join(qt.FORMATS)})",
+        default=None,
+        help=f"허용할 퀴즈 유형 (쉼표로 구분, 사용 가능: {','.join(qt.FORMATS)}). "
+        "생략하면 전부 허용하고 LLM이 문단마다 고른다. 하나만 주면 그 유형으로 고정",
     )
-    parser.add_argument(
-        "--quiz", type=int, default=4, help="총 문제 수 (유형별로 나눔)"
-    )
+    parser.add_argument("--quiz", type=int, default=4, help="총 문제 수")
     parser.add_argument(
         "--seed", type=int, default=None, help="문단 고르기·보기 섞기 시드 (재현용)"
     )
@@ -523,8 +609,7 @@ def main() -> None:
     logging.basicConfig(
         level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s"
     )
-    from groq import APIConnectionError, APIStatusError
-
+    get_model()  # 모델 설정이 없으면 임베딩을 불러오기 전에 바로 종료
     client = get_client()
     index = ParagraphIndex(load_model(), get_collection(), load_chunk_index())
     sources = retrieve(
@@ -554,20 +639,20 @@ def main() -> None:
                 print("\n답변에 인용된 자료가 없어 퀴즈를 건너뜁니다.")
                 return
             print("\n=== 확인 퀴즈 ===")
-            counts = qt.split_counts(args.formats, args.quiz)
             questions = make_quiz(
                 client,
                 args.question,
                 quiz_sources,
                 index,
-                counts,
+                args.quiz,
+                args.formats or list(qt.FORMATS),
                 random.Random(args.seed),
             )
             print_quiz(questions, args.solve)
     except APIConnectionError as e:
-        logger.error("Groq 연결 실패: %s", e)
+        logger.error("%s 연결 실패: %s", llm.NAME, e)
     except APIStatusError as e:
-        logger.error("Groq API 오류 (%s): %s", e.status_code, e.message)
+        logger.error("%s API 오류 (%s): %s", llm.NAME, e.status_code, e.message)
     except QuizFormatError as e:
         logger.error("%s", e)
 
