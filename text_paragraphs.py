@@ -457,6 +457,22 @@ class ParagraphIndex:
             found.append({**row, "score": round(1 - dist, 4), "distance": dist})
         return sorted(page_gate(concept, found), key=lambda u: -u["score"])
 
+    def in_page(self, page_id: int, book_id: int | None, query: str) -> list[dict]:
+        """한 페이지의 문단 전부를 질의와의 유사도순으로. 페이지 관문은 거치지 않는다.
+
+        학습자가 읽은 페이지의 다른 문단을 문제 후보로 고를 때 쓴다.
+        """
+        units = [u for u in self.rows(book_id).values() if u["page_id"] == page_id]
+        if not units:
+            return []
+        vec = np.asarray(embed(self.model, [query])[0], dtype=np.float32)
+        scores = self.vectors([u["unit_id"] for u in units]) @ vec
+        scored = [
+            {**u, "score": round(float(s), 4), "distance": 1 - float(s)}
+            for u, s in zip(units, scores)
+        ]
+        return sorted(scored, key=lambda u: -u["score"])
+
     def page_context(self, unit: dict, limit: int = PAGE_CONTEXT_CHARS) -> str:
         """핵심 문단이 속한 페이지(조각). 핵심 문단은 CORE_MARK 한 줄로 바꿔 중복해서 넣지 않는다.
 

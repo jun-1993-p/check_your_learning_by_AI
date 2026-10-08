@@ -66,13 +66,12 @@ from eval_common import (
     parse_book_id,
     titles_by_book_id,
 )
+from quiz_templates import BLANK, BlankError, contains, filled, make_question
 from text_embed import embed, load_chunk_index, load_model
 from text_paragraphs import ParagraphIndex, get_collection
 
-BLANK = "____"
 MAX_TRIES = 5
 CALL_RETRIES = 2  # 같은 문단으로 호출이 실패(JSON 생성 오류 등)하면 다시 시도하는 횟수
-MAX_ANSWER_CHARS = 30
 FREE_SEARCH_K = 5  # 필터 검사: 필터 없이 검색해 볼 상위 문단 수
 BOOK_URL = "https://wikidocs.net/book/{book_id}"
 ID_PREFIX = "c"  # 구글 시트가 "4307-01"을 날짜로 바꾸지 않도록 붙이는 접두어
@@ -201,73 +200,6 @@ def unlabel(value: str) -> str:
 
 
 # ---------------------------------------------------------------- 빈칸
-
-
-class BlankError(ValueError):
-    """LLM이 쓴 문장·정답으로 빈칸 문제를 만들 수 없음."""
-
-
-def normalize(text: str) -> str:
-    """공백·굽은 따옴표·끝 문장부호 차이를 없앤 비교용 문자열."""
-    text = text.translate(str.maketrans({"‘": "'", "’": "'", "“": '"', "”": '"'}))
-    return re.sub(r"\s+", "", text).rstrip(".!?")
-
-
-def contains(text: str, answer: str) -> bool:
-    """정답이 텍스트에 들어 있나 (공백·굽은 따옴표 차이는 무시)."""
-    return normalize(answer) in normalize(text)
-
-
-def answer_pattern(answer: str) -> re.Pattern:
-    """문장 안에서 정답과 같은 단어를 찾는 정규식. 영문 식별자의 일부(print 안의 int 등)는 제외."""
-    left = r"(?<![A-Za-z0-9_])" if re.match(r"[A-Za-z0-9_]", answer[0]) else ""
-    right = r"(?![A-Za-z0-9_])" if re.match(r"[A-Za-z0-9_]", answer[-1]) else ""
-    return re.compile(f"{left}{re.escape(answer)}{right}")
-
-
-def make_question(text: str, answer: str) -> tuple[str, int]:
-    """LLM이 쓴 문장으로 (빈칸 문제, 빈칸 수). 이미 ____로 비워 왔으면 그대로 쓰되 남은 정답도 가린다.
-
-    ____가 없으면 문장에서 정답을 찾아 직접 가린다 (blank_out).
-    """
-    answer = answer.strip()
-    if BLANK not in text:
-        return blank_out(text, answer)
-    if not answer:
-        raise BlankError("정답이 비어 있음")
-    if len(answer) > MAX_ANSWER_CHARS:
-        raise BlankError(f"정답이 너무 김({len(answer)}자)")
-    question = answer_pattern(answer).sub(BLANK, text)  # 같은 단어가 남아 있으면 가린다
-    if question.replace(BLANK, "").strip() == "":
-        raise BlankError("문제에 빈칸 말고 내용이 없음")
-    return question, question.count(BLANK)
-
-
-def blank_out(sentence: str, answer: str) -> tuple[str, int]:
-    """문장에서 정답을 모두 가린 (문제, 빈칸 수). 가릴 수 없으면 BlankError."""
-    answer = answer.strip()
-    if not answer:
-        raise BlankError("정답이 비어 있음")
-    if len(answer) > MAX_ANSWER_CHARS:
-        raise BlankError(f"정답이 너무 김({len(answer)}자)")
-    if BLANK in sentence:
-        raise BlankError("원문에 빈칸 표시가 이미 있음")
-    if answer not in sentence:
-        raise BlankError(f"정답이 문장에 없음: {answer}")
-    if normalize(answer) == normalize(sentence):
-        raise BlankError("정답이 문장 전체")
-
-    question, count = answer_pattern(answer).subn(BLANK, sentence)
-    if count == 0:  # 같은 단어가 없으면 있는 그대로 첫 번째 하나만 가린다
-        question, count = sentence.replace(answer, BLANK, 1), 1
-    if normalize(question.replace(BLANK, answer)) != normalize(sentence):
-        raise BlankError("채운 문장이 원문과 다름")
-    return question, count
-
-
-def filled(question: str, answer: str) -> str:
-    """빈칸을 정답으로 채운 문장."""
-    return question.replace(BLANK, answer)
 
 
 # ---------------------------------------------------------------- LLM
