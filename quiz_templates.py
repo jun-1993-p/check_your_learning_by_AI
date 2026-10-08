@@ -165,8 +165,9 @@ FORMAT_GUIDE = {
         "4지선다: choices는 서로 다른 보기 4개이고 번호(A), 1.)를 붙이지 마. "
         "보기 4개는 모두 같은 형태로 써: 결과 예측이면 모두 실행 결과 값, "
         "함수 선택이면 모두 함수 이름, 개념 이해면 모두 설명 문장. "
-        "오답은 비슷한 개념과의 혼동, 방향·범위 착각 같은 실제 실수로 만들고, "
-        "정답만 유난히 길거나 혼자 다른 표현을 쓰지 않게 해. "
+        "오답은 [문단]을 피상적으로 읽은 학습자가 고를 법하게 만들어: 비슷한 개념과의 혼동, "
+        "방향·범위 착각, 문단 속 다른 용어나 조건을 잘못 연결한 실제 실수여야 하고, 누가 봐도 틀린 보기는 안 돼. "
+        "보기들의 문법·구체성·어조·정보량을 맞추고, 정답만 유난히 길거나 짧거나 혼자 다른 표현을 쓰지 않게 해. "
         "choice_notes는 choices와 같은 순서로, 보기마다 맞거나 틀린 이유를 한 줄로."
     ),
     "short": (
@@ -184,13 +185,6 @@ def build_schema(fmt: str) -> dict:
 def format_instruction(fmt: str) -> str:
     fields = ", ".join(["reject_reason", *ITEM_PROPS[fmt], *COMMON_PROPS])
     return f"- {FORMAT_GUIDE[fmt]}\n  필드: {fields}"
-
-
-def split_counts(formats: list[str], total: int) -> dict[str, int]:
-    """총 문제 수를 유형에 고르게 나눈다. 나머지는 앞 유형부터 하나씩 더한다."""
-    base, extra = divmod(total, len(formats))
-    counts = {fmt: base + (i < extra) for i, fmt in enumerate(formats)}
-    return {fmt: n for fmt, n in counts.items() if n > 0}
 
 
 # ---------------------------------------------------------------- 검증·정리

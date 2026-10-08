@@ -13,8 +13,8 @@ CASES_CSV = (
     PROJECT_ROOT / ".idea_folder" / "testcase" / "테스트 케이스.정확도 - 시트1.csv"
 )
 OUT_DIR = DATA_ROOT / "eval"
+# 모델은 .env의 GROQ_MODEL로 정한다 (quiz_session.get_model).
 # 모델이 바뀌면 이전 결과와 직접 비교할 수 없으니 결과 파일 이름에 모델명을 넣는다
-DEFAULT_EVAL_MODEL = "openai/gpt-oss-20b"
 # 추론 모델은 생각 토큰도 max_tokens에 포함돼 작으면 JSON 전에 잘린다.
 # 추론 강도를 낮추고 상한을 넉넉히 잡는다 (Groq 추론 모델 옵션)
 MODEL_OPTIONS = {
@@ -23,10 +23,15 @@ MODEL_OPTIONS = {
 DEFAULT_MAX_TOKENS = 200  # 분당 출력 토큰 한도(1,000)를 아끼려고 작게 잡는다
 TEMPERATURE = 0.3
 GROQ_MAX_RETRIES = 6  # 분당 한도에 걸리면 SDK가 대기 후 재시도한다
+MAX_API_ERRORS = 5  # API 오류가 연속으로 이만큼 쌓이면 실행을 멈춘다
 
 
 class DailyLimitReached(Exception):
     """Groq 하루 한도(토큰·요청). 기다려도 바로 풀리지 않으니 실행을 멈춘다."""
+
+
+class ApiErrorsPiledUp(Exception):
+    """API 오류가 연속으로 쌓였다. 모델 ID·키·서버 문제일 가능성이 커서 실행을 멈춘다."""
 
 
 def model_options(model: str) -> dict:

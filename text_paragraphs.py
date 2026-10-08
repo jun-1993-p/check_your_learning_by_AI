@@ -29,6 +29,7 @@ import hashlib
 import logging
 import os
 import re
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -63,6 +64,8 @@ PAGE_CONTEXT_CHARS = 4000  # 페이지 맥락 최대 글자 수
 # "[이미지: 02_3_list.png]" 표시는 LLM에 정보가 없고 글자만 차지해서 뺀다 (뒤따르는 공백까지)
 IMAGE_MARK = re.compile(r"\[이미지: [^\]]*\]\s*")
 FIGURE_REF = re.compile(r"그림\s?\d+(\.\d+)*")  # 내용이 그림에 있다는 신호
+FENCED_CODE = re.compile(r"```[^\n]*\n.*?```[ \t]*\n?", re.DOTALL)  # 렌더링된 텍스트의 코드 블록
+EXTRA_BLANK_LINES = re.compile(r"\n{3,}")
 
 FETCH_LIMIT = 300  # 검색할 때 벡터에서 가져오는 후보 수 (관문을 거치고 나면 줄어든다)
 GATE_STOPWORDS = {"자료형", "파이썬", "파이썬의", "값을", "저장하는", "공간", "기본"}
@@ -71,6 +74,35 @@ GATE_ALIASES = {
     "불": ["bool", "불 자료형"],
     "숫자형": ["숫자"],
 }
+
+# 적합성 관문: 문장 단위로 사실이 아닌 문장을 가려내는 규칙. 사실 문장이 MIN_FACT_CHARS보다 적으면 문단을 뺀다
+SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+|\n+")
+MIN_FACT_CHARS = 40
+# 정의 문장: "X는/이란 ... Y이다·의미한다·부른다·라고 한다"처럼 개념을 풀이하는 문장
+DEFINITION = re.compile(
+    r"(?:은|는|이란|란)\s.{4,}?"
+    r"(?:의미한다|의미합니다|말한다|말합니다|뜻한다|뜻합니다|가리킨다|가리킵니다|"
+    r"부른다|부릅니다|라고 한다|라고 합니다|이라고 한다|이라고 합니다)[.!]?$"
+)  # '~것이다'·'~점입니다' 같은 서술문은 정의가 아니라서 이다·입니다는 넣지 않는다
+# 코드가 있었던 문단(has_code)은 코드를 봐야 풀리는 문제가 나와 오답률이 높아 당분간 제외한다.
+# False면 코드를 뺀 설명 글만으로 같은 기준을 적용해 통과시킨다
+EXCLUDE_CODE = True
+UNFIT_PATTERNS = {
+    "도입·예고": re.compile(
+        r"알아보(자|겠|도록)|살펴보(자|겠|도록)|배워 ?보(자|겠)|해 ?보(자|겠)|"
+        r"다음 (장|절|절에서)|마무리|소개한다|시작해 ?보"
+    ),
+    "회고": re.compile(r"(배웠|살펴봤|알아봤|보았|봤)(습니다|다)|앞(에서|서)\s*(\S+\s*){0,3}(배웠|다뤘|설명)"),
+    "비유": re.compile(
+        r"비유|빗대|마치 |(인간|사람|현실|실생활|일상)(으로|에서|세계)\s*(치면|비유|는|에서는)|"
+        r"드라마|유전형질|재산"
+    ),
+    "평가·감상": re.compile(r"매력|재미있|흥미|장벽|중요(하다|합니다)|어렵(게|다고) 느|걱정|두려"),
+}
+
+# 짧은 문단은 정보가 없어도 개념어가 겹치면 점수가 높게 나온다. 이보다 짧으면 길이에 비례해 감점한다
+SHORT_UNIT_CHARS = 80
+SHORT_PENALTY = 0.1  # 아주 짧은 문단(길이 0)에 빼는 최대 점수
 
 logger = logging.getLogger("text_paragraphs")
 
@@ -210,8 +242,23 @@ def embed_text(title: str, section: str, chosen: list[dict]) -> str:
     return f"{head}\n{body}".strip()
 
 
+def code_ids_of(blocks: list[dict]) -> list[str]:
+    """블록 목록의 코드 블록 id (개념 상자 안쪽 포함). 코드 본문은 code_blocks.jsonl에 있다."""
+    ids: list[str] = []
+    for block in blocks:
+        if block["type"] in CODE_BLOCKS and block.get("code_id"):
+            ids.append(block["code_id"])
+        elif block["type"] == "concept_box":
+            ids += code_ids_of(block["blocks"])
+    return ids
+
+
 def build_units(chunk: dict) -> list[dict]:
-    """조각의 A+ 문단 목록. 각 문단은 블록 범위(block_start, block_end)를 갖는다."""
+    """조각의 A+ 문단 목록. 각 문단은 블록 범위(block_start, block_end)를 갖는다.
+
+    text에는 코드 블록이 없다 (code_ids/has_code로만 알린다). 임베딩 텍스트(embed_text)에는 코드가
+    그대로 들어 있어서 벡터와 검색은 코드를 뺀 뒤에도 달라지지 않는다.
+    """
     blocks = chunk["blocks"]
     secs = sections(blocks)
     ranges = merge_short(blocks, secs, attach_blocks(blocks, explain_ranges(blocks)))
@@ -222,9 +269,11 @@ def build_units(chunk: dict) -> list[dict]:
     for start, end in ranges:
         chosen = blocks[start:end]
         raw = render_blocks(chosen)
-        text = IMAGE_MARK.sub("", raw).strip()
-        if len(text) < MIN_UNIT_CHARS:
+        full = IMAGE_MARK.sub("", raw).strip()
+        if len(full) < MIN_UNIT_CHARS:  # 코드까지 센 길이로 거른다: 문단 목록과 id가 코드를 빼기 전과 같다
             continue
+        # 코드는 문제 생성에 마이너스라 LLM에 주는 본문(text)에서 뺀다. 코드는 code_ids로 코드 저장소와 잇는다
+        text = EXTRA_BLANK_LINES.sub("\n\n", FENCED_CODE.sub("", full)).strip()
         section, anchor = secs[start]
         body = embed_text(title, section, chosen)
         units.append(
@@ -239,6 +288,8 @@ def build_units(chunk: dict) -> list[dict]:
                 "fallback": not section,
                 "url": anchor_url(chunk, anchor),
                 "text": text,
+                "code_ids": code_ids_of(chosen),
+                "has_code": "```" in full,  # 목록 안에 들어간 코드처럼 code_id가 없는 코드도 센다
                 "has_image": bool(IMAGE_MARK.search(raw)),
                 "figure_ref": bool(FIGURE_REF.search(text)),
                 "block_start": start,
@@ -395,6 +446,63 @@ def concept_tokens(concept: str) -> list[str]:
     return tokens or [concept.lower()]
 
 
+def search_query(concept: str) -> str:
+    """임베딩 질의. 본문이 영문으로 쓴 개념은 별칭을 붙인다. '불리언' → '불리언 (boolean, bool)'."""
+    aliases = [a for w in re.split(r"[\s,]+", concept) for a in GATE_ALIASES.get(w, [])]
+    return f"{concept} ({', '.join(aliases)})" if aliases else concept
+
+
+def short_penalty(text: str) -> float:
+    """SHORT_UNIT_CHARS보다 짧은 문단에 빼는 점수. 짧을수록 크다."""
+    return SHORT_PENALTY * max(0.0, 1 - len(text.strip()) / SHORT_UNIT_CHARS)
+
+
+def unfit_reason(text: str, has_code: bool = False) -> str | None:
+    """빈칸 문제의 근거로 쓸 수 없는 문단이면 이유를, 쓸 수 있으면 None을 돌려준다.
+
+    문단 안에서 도입·예고·회고, 비유, 평가·감상 문장을 빼고 남는 '사실' 문장이
+    너무 적으면 부적합으로 본다. text에는 코드가 없으므로 코드가 있었던 문단(has_code)은
+    EXCLUDE_CODE이 True면(기본) 제외하고, False면 설명 글만으로 같은 기준을 적용한다.
+    """
+    sentences = [s.strip() for s in SENTENCE_SPLIT.split(text) if s.strip()]
+    # 첫 문장이 도입·회고면 뒤 문장이 앞 예제·다음 코드를 가리키는 경우가 많아 문단째 뺀다.
+    # 단, 뒤에 스스로 선 정의 문장("X는 Y이다")이 있으면 그 문장으로 낼 수 있어 남긴다
+    for reason in ("도입·예고", "회고"):
+        if sentences and UNFIT_PATTERNS[reason].search(sentences[0]):
+            if any(
+                DEFINITION.search(s) and not any(p.search(s) for p in UNFIT_PATTERNS.values())
+                for s in sentences[1:]
+            ):
+                break
+            return f"{reason}(첫 문장)"
+    if has_code and EXCLUDE_CODE:
+        return "코드 포함"
+    facts = 0
+    reasons: Counter = Counter()
+    for sentence in sentences:
+        for reason, pattern in UNFIT_PATTERNS.items():
+            if pattern.search(sentence):
+                reasons[reason] += 1
+                break
+        else:
+            facts += len(sentence)
+    if facts >= MIN_FACT_CHARS:
+        return None
+    return reasons.most_common(1)[0][0] if reasons else "내용 부족"
+
+
+def fit_gate(hits: list[dict]) -> list[dict]:
+    """unfit_reason에 걸리지 않는 문단만 남긴다. 걸러 낸 문단은 DEBUG 로그에 이유와 함께 남는다."""
+    kept = []
+    for hit in hits:
+        reason = unfit_reason(hit["text"], hit.get("has_code", False))
+        if reason is None:
+            kept.append(hit)
+        else:
+            logger.debug("부적합 문단(%s): %s", reason, hit["text"][:40])
+    return kept
+
+
 def page_gate(concept: str, hits: list[dict]) -> list[dict]:
     """개념 핵심어가 페이지 경로에 있는 문단만 남긴다. 하나도 없으면 그대로 둔다."""
     tokens = concept_tokens(concept)
@@ -434,9 +542,13 @@ class ParagraphIndex:
         concept: str,
         book_id: int | None = None,
         exclude: frozenset[str] = frozenset(),
+        fit: bool = False,
     ) -> list[dict]:
-        """문단을 점수(코사인 유사도)순으로. 페이지 관문을 거친다. exclude는 이미 쓴 unit_id."""
-        query = embed(self.model, [concept])
+        """문단을 점수순으로. 점수는 코사인 유사도에서 짧은 문단 감점을 뺀 값이다.
+
+        관문 순서: 페이지 관문 → (fit=True면) 적합성 관문 → 점수순 정렬. exclude는 이미 쓴 unit_id.
+        """
+        query = embed(self.model, [search_query(concept)])
         result = self.collection.query(
             query_embeddings=query,
             n_results=FETCH_LIMIT,
@@ -454,8 +566,12 @@ class ParagraphIndex:
                 continue
             if row["embed_hash"] != meta.get("embed_hash"):
                 continue
-            found.append({**row, "score": round(1 - dist, 4), "distance": dist})
-        return sorted(page_gate(concept, found), key=lambda u: -u["score"])
+            score = 1 - dist - short_penalty(row["text"])
+            found.append({**row, "score": round(score, 4), "distance": dist})
+        found = page_gate(concept, found)
+        if fit:
+            found = fit_gate(found)
+        return sorted(found, key=lambda u: -u["score"])
 
     def in_page(self, page_id: int, book_id: int | None, query: str) -> list[dict]:
         """한 페이지의 문단 전부를 질의와의 유사도순으로. 페이지 관문은 거치지 않는다.
@@ -479,7 +595,10 @@ class ParagraphIndex:
         길이가 limit를 넘으면 핵심 문단에서 앞뒤로 블록을 번갈아 넓혀 가며 limit 안에서 자른다.
         """
         blocks = self.chunk_index[unit["chunk_id"]]["blocks"]
-        rendered = [IMAGE_MARK.sub("", render_block(b)).strip() for b in blocks]
+        # 코드는 문제 생성에 마이너스라 맥락에서도 뺀다 (코드 블록은 빈 문자열이 되어 건너뛴다)
+        rendered = [
+            FENCED_CODE.sub("", IMAGE_MARK.sub("", render_block(b))).strip() for b in blocks
+        ]
         start, end = unit["block_start"], unit["block_end"]
         budget = limit - len(CORE_MARK)
         lo, hi, used = start, end, 0

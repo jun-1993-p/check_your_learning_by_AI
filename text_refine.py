@@ -20,9 +20,12 @@ text_ingestion.py가 만든 pages.jsonl을 목록으로 삼고, raw/{id}.html만
 """
 
 import argparse
+import ast
 import json
 import logging
 import re
+import warnings
+from collections import Counter
 from pathlib import Path
 
 from bs4 import BeautifulSoup, NavigableString, Tag
@@ -55,6 +58,25 @@ CONFIG_FILE = PROJECT_ROOT / "refine_config.json"
 
 LANG_ALIASES = {"textplain": "plaintext", "no-highlight": "plaintext"}
 PYTHON_LANGS = {"python", "py", "python3", "pycon"}
+SHELL_LANGS = {"bash", "sh", "shell", "console", "powershell", "bat"}
+# 원본(위키독스)이 강조할 줄에 박아 둔 표시
+MARK_TAG = re.compile(r"\[\[/?MARK\]\]")
+# 명령줄(C:\...> 프롬프트, $ 프롬프트, python 파일.py 실행)
+SHELL_LINE = re.compile(
+    r"^(?:[A-Za-z]:\\[^>\n]*>|[A-Za-z]:\\\S*\.exe\b|\$ |python3?\s+\S+\.py)", re.MULTILINE
+)
+# python으로 표시됐지만 실행 결과·표인 블록 (날짜로 시작하는 표, 오류 출력, IDLE 재시작 줄)
+OUTPUT_LIKE = re.compile(
+    r"^(?:\d{4}-\d{2}-\d{2}\s|Traceback \(most recent call last\)|=+ RESTART:)", re.MULTILINE
+)
+# 원본 작성 오류로 단락에 떨어져 나온 코드 울타리 여는 줄 (예: ```{.py}). 이어지는 <pre>가 진짜 코드다
+STRAY_FENCE = re.compile(r"`{3}[\w{}.\-]*")
+# IPython 세션(`In [3]:` 프롬프트). >>> 대화형과 달리 입출력을 나누지 않고 문법 검사도 하지 않는다
+IPYTHON_PROMPT = re.compile(r"^(?:In|Out) ?\[\d+\]:", re.MULTILINE)
+# 문법이 안 맞는 블록 중 파이썬 코드다운 줄이 하나도 없으면 코드가 아니라 실행 결과(표·값)다
+CODE_TOKEN = re.compile(
+    r"^\s*(?:def|class|import|from|for|while|if|elif|else|return|print)\b|\w\s*=[^=]|\w\(.*\)|:\s*$"
+)
 # 들여쓰기 없는 줄에 나오는 오류 출력만 잡는다 (except 절 코드는 제외)
 ERROR_LINE = re.compile(
     r"^([A-Z]\w*(?:Error|Exception|Warning|Interrupt)|StopIteration)\b"
@@ -162,37 +184,99 @@ def parse_code(pre: Tag) -> dict:
         if cls.startswith("language-"):
             lang = cls.removeprefix("language-")
     lang = LANG_ALIASES.get(lang, lang)
-    code = code_tag.get_text().rstrip("\n")
+    raw = code_tag.get_text().rstrip("\n")
+    # 원본이 강조하려고 코드 안에 박아 둔 [[MARK]] 표시는 코드가 아니라서 뗀다 (뗀 사실은 marked에 남긴다)
+    code = MARK_TAG.sub("", raw)
 
     block: dict = {"type": "code", "lang": lang, "code": code}
+    if code != raw:
+        block["marked"] = True
     # 오류 출력과 >>> 대화형 예제는 파이썬 코드에서만 해석한다.
     # 실행 결과는 보통 plaintext로 표시되므로 plaintext도 포함한다
-    if lang not in PYTHON_LANGS and lang != "plaintext":
-        return block
-    errors = [m.group(1) for line in code.split("\n") if (m := ERROR_LINE.match(line))]
-    if errors:
-        block["error"] = errors[-1]
-    if code.lstrip().startswith(">>>"):
-        block["type"] = "code_example"
-        block["pairs"] = split_interactive(code)
+    if lang in PYTHON_LANGS or lang == "plaintext":
+        errors = [m.group(1) for line in code.split("\n") if (m := ERROR_LINE.match(line))]
+        if errors:
+            block["error"] = errors[-1]
+        if code.lstrip().startswith(">>>"):
+            block["type"] = "code_example"
+            block["pairs"] = split_interactive(code)
+    block["kind"], block["syntax_ok"], block["issues"] = classify_code(block)
     return block
 
 
 def split_interactive(code: str) -> list[dict]:
-    """>>> 대화형 코드를 입력·출력 쌍으로 나눈다."""
+    """>>> 대화형 코드를 입력·출력 쌍으로 나눈다.
+
+    책에는 `...` 없이 들여쓰기만 한 이어쓰기 줄이 있다. 입력이 `:`로 끝난 뒤의 들여쓴 줄(사이의
+    빈 줄 포함)은 출력이 아니라 입력의 이어쓰기로 본다.
+    """
     pairs: list[dict] = []
-    for line in code.split("\n"):
+    lines = code.split("\n")
+    in_block = False  # 앞선 입력이 복합문(`:`로 끝남)이라 들여쓴 줄이 이어지는 중
+    for n, line in enumerate(lines):
         if line.startswith(">>>"):
             pairs.append({"input": [line[4:]], "output": []})
+            in_block = line[4:].rstrip().endswith(":")
         elif pairs and line.startswith("...") and not pairs[-1]["output"]:
             pairs[-1]["input"].append(line[4:])
+            in_block = line[4:].rstrip().endswith(":") or in_block
+        elif pairs and in_block and not pairs[-1]["output"] and continues_block(lines, n):
+            pairs[-1]["input"].append(line)
         elif pairs:
             pairs[-1]["output"].append(line)
+            in_block = False
     result = [
         {"input": "\n".join(p["input"]), "output": "\n".join(p["output"]).rstrip()}
         for p in pairs
     ]
     return [p for p in result if p["input"].strip() or p["output"]]  # 빈 >>> 줄 제외
+
+
+def continues_block(lines: list[str], n: int) -> bool:
+    """lines[n]이 복합문 입력의 이어쓰기 줄인가: 들여쓴 줄이거나, 뒤에 들여쓴 줄이 또 이어지는 빈 줄."""
+    line = lines[n]
+    if line[:1] in (" ", "\t"):
+        return True
+    if line.strip():
+        return False
+    for nxt in lines[n + 1 :]:
+        if nxt.strip():
+            return nxt[:1] in (" ", "\t")
+    return False
+
+
+def classify_code(block: dict) -> tuple[str, bool | None, list[str]]:
+    """코드 블록의 종류, 문법 검사 결과, 문제점 목록.
+
+    종류: repl(>>> 대화형) / ipython(In [n]: 세션) / python(문법이 맞는 코드) / shell(명령줄) / output(실행 결과·표) /
+    pseudo(python으로 표시됐지만 문법이 안 맞는 의사코드·문법 설명·불완전한 코드) / other(다른 언어).
+    syntax_ok는 파이썬 코드로 읽을 수 있는 블록만 True/False이고 나머지는 None이다.
+    """
+    lang, code = block["lang"], block["code"]
+    if lang in SHELL_LANGS or SHELL_LINE.search(code):
+        return "shell", None, []
+    if lang not in PYTHON_LANGS and lang != "plaintext":
+        return "other", None, []
+    if IPYTHON_PROMPT.search(code):
+        return "ipython", None, []
+    if block["type"] == "code_example":
+        source = "\n".join(p["input"] for p in block.get("pairs", []))
+        kind = "repl"
+    elif lang == "plaintext" or OUTPUT_LIKE.search(code):
+        return "output", None, []
+    else:
+        source, kind = code, "python"
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")  # "\d" 같은 이스케이프 경고는 문법 오류가 아니다
+            ast.parse(source)
+    except (SyntaxError, ValueError) as e:
+        msg = getattr(e, "msg", str(e))
+        issue = "truncated" if "expected an indented block" in msg else "syntax_error"
+        if kind == "python" and not any(CODE_TOKEN.search(l) for l in code.split("\n")):
+            return "output", None, []
+        return ("repl" if kind == "repl" else "pseudo"), False, [issue]
+    return kind, True, []
 
 
 def parse_table(table: Tag) -> dict:
@@ -241,7 +325,7 @@ def parse_blocks(container: Tag) -> list[dict]:
                 )
         elif name == "p":
             text = _clean_lines(render_inline(node))
-            if not text:
+            if not text or STRAY_FENCE.fullmatch(text):
                 continue
             plain = text.strip("*")
             # "표 2.1은 ~이다." 같은 본문 문장은 캡션으로 보지 않는다
@@ -351,6 +435,40 @@ def _strip_private(block: dict) -> dict:
     return clean
 
 
+def assign_code_ids(blocks: list[dict], chunk_id: str, prefix: str = "") -> None:
+    """코드 블록마다 code_id를 붙인다. 문단 id(`{chunk_id}#b{블록 번호}`)와 같은 번호 체계이고,
+    개념 상자 안의 블록은 `#b{상자 번호}.{안쪽 번호}`다."""
+    for i, block in enumerate(blocks):
+        name = f"{prefix}{i}"
+        if block["type"] in ("code", "code_example"):
+            block["code_id"] = f"{chunk_id}#b{name}"
+        elif block["type"] == "concept_box":
+            assign_code_ids(block["blocks"], chunk_id, f"{name}.")
+
+
+def code_rows(chunk: dict) -> list[dict]:
+    """코드 저장소(code_blocks.jsonl)에 쓸 줄: 조각의 코드 블록마다 하나."""
+    rows: list[dict] = []
+
+    def walk(blocks: list[dict]) -> None:
+        for block in blocks:
+            if block["type"] == "concept_box":
+                walk(block["blocks"])
+            elif block["type"] in ("code", "code_example"):
+                rows.append(
+                    {
+                        "code_id": block["code_id"],
+                        "chunk_id": chunk["chunk_id"],
+                        "page_id": chunk["page_id"],
+                        "book_id": chunk["book_id"],
+                        **{k: v for k, v in block.items() if k != "code_id"},
+                    }
+                )
+
+    walk(chunk["blocks"])
+    return rows
+
+
 def make_chunk(page: dict, body: Tag) -> dict | None:
     """페이지 하나를 조각 하나로 만든다. 본문 블록이 없으면 None.
 
@@ -360,6 +478,7 @@ def make_chunk(page: dict, body: Tag) -> dict | None:
     blocks = parse_blocks(body)
     if not blocks:
         return None
+    assign_code_ids(blocks, f"{page['id']}-01")
     return {
         "chunk_id": f"{page['id']}-01",
         "page_id": page["id"],
@@ -433,6 +552,14 @@ def refine_book(book_dir: Path, force: bool = False) -> None:
     write_if_changed(
         excluded_file, json.dumps(excluded, ensure_ascii=False, indent=2) + "\n"
     )
+    # 코드는 조각 안의 블록과 별도로 저장소에도 둔다 (종류·문법 검사 결과로 골라 쓰려고)
+    rows = [row for c in all_chunks for row in code_rows(c)]
+    write_if_changed(
+        book_dir / "code_blocks.jsonl",
+        "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in rows),
+    )
+    kinds = Counter(r["kind"] for r in rows)
+    logger.info("%s: 코드 블록 %d개 %s", book_dir.name, len(rows), dict(kinds))
     content = "".join(json.dumps(c, ensure_ascii=False) + "\n" for c in all_chunks)
     changed = write_if_changed(chunks_file, content)
     if not changed:
