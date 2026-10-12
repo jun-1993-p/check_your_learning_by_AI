@@ -1,0 +1,2681 @@
+
+
+
+<!DOCTYPE HTML>
+<html lang="ko">
+    <head>
+        <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        
+        <meta name="google-site-verification"
+              content="mzkAy71X1qQFWihQN535LoiToXg34MUg9nuor7Og9E8" />
+        <meta name="naver-site-verification"
+              content="a7b53e9ea172d3cefcc05eaba6ebf7180eca08fa" />
+        
+    <meta name="description"
+          content="프로그램을 만들다 보면 수없이 많은 오류를 만나게 된다. 물론 오류가 발생하는 이유는 프로그램이 잘못 동작하는 것을 막기 위한 파이썬의 배려이다. 이번에는 파이썬에서 오류를 처리…">
+    <meta property="og:type" content="website">
+    <meta property="og:site_name" content="위키독스">
+    <meta property="og:title" content="05-4 예외 처리">
+    <meta property="og:description"
+          content="프로그램을 만들다 보면 수없이 많은 오류를 만나게 된다. 물론 오류가 발생하는 이유는 프로그램이 잘못 동작하는 것을 막기 위한 파이썬의 배려이다. 이번에는 파이썬에서 오류를 처리…">
+    <meta property="og:image"
+          content="https://static.wikidocs.net/images/book/점프투파이썬_표지_앞면_고_1768236078_1768489050_1768489264.jpg">
+    <meta property="og:url"
+          content="https://wikidocs.net/30">
+
+        <link rel="apple-touch-icon"
+              sizes="180x180"
+              href="https://static.wikidocs.net/static/img/LaunchImage.png?v=1088">
+        <link rel="manifest"
+              href="https://static.wikidocs.net/static/site.webmanifest?v=1098">
+        <link rel="icon"
+              type="image/x-icon"
+              sizes="16x16 32x32 48x48 64x64 128x128 256x256"
+              href="https://static.wikidocs.net/static/img/favicon.ico?v=1088">
+        
+    <link rel="canonical" href="https://wikidocs.net/30">
+
+        <link rel="stylesheet"
+      href="https://static.wikidocs.net/fonts/pretendard/v1.3.9/pretendardvariable-dynamic-subset.min.css?v=2" />
+<link rel="stylesheet"
+      href="https://static.wikidocs.net/fonts/nanum-barun-gothic-yet-hangul/v1/nanum-barun-gothic-yet-hangul.css" />
+
+        <title>
+            
+    05-4 예외 처리 - 점프 투 파이썬
+
+        </title>
+        <link rel="stylesheet"
+              href="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/css/bootstrap.min.css"
+              integrity="sha384-BVYiiSIFeK1dGmJRAkycuHAHRg32OmUcww7on3RYdg4Va+PmSTsz/K68vbdEjh4u"
+              crossorigin="anonymous">
+        <link type="text/css"
+              href="https://static.wikidocs.net/static/book/css/common.min.css?v=1098"
+              rel="stylesheet"
+              media="screen" />
+        
+            <link type="text/css"
+                  id="main-stylesheet"
+                  href="https://static.wikidocs.net/static/book/css/style_stack.min.css?v=1098"
+                  rel="stylesheet"
+                  media="screen" />
+        
+        
+    
+<link type="text/css"
+      href="https://static.wikidocs.net/static/apprise/apprise.min.css?v=1098"
+      rel="stylesheet" />
+<link type="text/css"
+      href="https://static.wikidocs.net/static/treeview/bootstrap-treeview.min.css?v=1098"
+      rel="stylesheet" />
+
+    <link type="text/css"
+          id="markdown-stylesheet"
+          href="https://static.wikidocs.net/static/book/css/markdown_stack.min.css?v=1098"
+          rel="stylesheet" />
+    <link rel="stylesheet"
+          id="highlight-stylesheet"
+          href="//cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.1/styles/default.min.css">
+
+<link type="text/css"
+      href="https://static.wikidocs.net/static/book/css/copycode.min.css?v=1098"
+      rel="stylesheet" />
+
+    
+    
+    
+    <style>
+        ins.adsbygoogle[data-ad-status="unfilled"] {
+            display: none !important;
+        }
+
+        .ad-wrapper:has(> ins.adsbygoogle[data-ad-status="unfilled"]),
+        .dynamic-ad:has(> ins.adsbygoogle[data-ad-status="unfilled"]) {
+            display: none !important;
+        }
+
+        .wikidocs-ad-top-block .first-ad,
+        .wikidocs-ad-top-block .second-ad,
+        .wikidocs-ad-top-block .ad-wrapper {
+            height: 280px;
+            min-height: 280px;
+            overflow: hidden;
+        }
+
+        .wikidocs-ad-top-block .first-ad:has(ins.adsbygoogle[data-ad-status="unfilled"]),
+        .wikidocs-ad-top-block .second-ad:has(ins.adsbygoogle[data-ad-status="unfilled"]),
+        .wikidocs-ad-top-block .ad-wrapper:has(ins.adsbygoogle[data-ad-status="unfilled"]) {
+            height: 0;
+            min-height: 0;
+        }
+    </style>
+    
+
+        
+    
+
+
+        
+            <!-- Global site tag (gtag.js) - Google Analytics -->
+            <script async src="https://www.googletagmanager.com/gtag/js?id=G-6N5MJRGLWG"></script>
+            <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+        gtag('js', new Date());
+        gtag('config', 'G-6N5MJRGLWG');
+        /* Google Ads 전환 측정을 다시 사용할 경우 아래 주석을 해제합니다.
+        gtag('config', 'AW-1044074083');
+        gtag('event', 'conversion', {
+            'send_to': 'AW-1044074083/jW6kCMei2KYaEOOc7fED',
+            'value': 1.0,
+            'currency': 'KRW'
+        });
+        */
+            </script>
+        
+    </head>
+    <body data-is-mobile="false"
+          data-async-page-navigation="true"
+          data-is-authenticated="false"
+          data-is-debug="false"
+           data-is-darkmode='false' >
+        
+    <div id="wikidocs-reader-side-ad">
+        
+            <!-- PC -->
+
+    
+        <aside id="asideRight" class="asideRight">
+    <div id="chaseRight" style="margin-top: 40px;">
+        
+            <script async
+                    src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9470517771012578"
+                    crossorigin="anonymous"></script>
+            <!-- 위키독스_데스크탑_본문_300x250 -->
+            <ins class="adsbygoogle"
+                 style="display:inline-block;
+                        width:300px;
+                        height:250px"
+                 data-ad-client="ca-pub-9470517771012578"
+                 data-ad-slot="1227190832"></ins>
+            <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+        
+    </div>
+</aside>
+
+    
+
+
+        
+    </div>
+
+        
+        
+        <div class="container" style="padding-bottom:50px">
+            
+    <div class="content row tex2jax_ignore wikidocs-reader-layout"
+         style="margin-top:0px">
+        <div class="col-sm-3 wikidocs-reader-toc-column">
+
+<div class="row"
+     id="toc-data"
+     data-book-id="1"
+     data-toc-folding="N"
+     data-responsive-drawer="true">
+    
+        <button type="button"
+                class="mobile-toc-btn wikidocs-reader-toc-trigger"
+                aria-label="책 목차 열기"
+                aria-controls="wikidocs-reader-book-toc"
+                aria-expanded="false"
+                data-wikidocs-mobile-toc-trigger>
+            <span class="glyphicon glyphicon-list" aria-hidden="true"></span>
+        </button>
+        <div class="wikidocs-reader-toc-backdrop"
+             data-wikidocs-mobile-toc-backdrop></div>
+    
+    <div class="col-sm-3 sidebar"
+         id="wikidocs-reader-book-toc" data-wikidocs-mobile-toc-panel
+         style="padding:0;
+                margin:0;
+                overflow-x: hidden">
+        
+        <div class="toc toc-checker">
+            <div class="row">
+                <div class="col-xs-12" style="padding:0;">
+                    <div class="row clearfix toc-toolbar wikidocs-reader-toc-toolbar"
+                         style="margin:0;
+                                padding:0;
+                                border-bottom:solid 1px #ccc">
+                        <div class="toc-search">
+                            <input type="text"
+                                   id="kw"
+                                   name="kw"
+                                   class="input-search"
+                                   placeholder="검색어를 입력하세요."
+                                   autocomplete="off">
+                            <ul id="search-results" class="dropdown-menu" aria-labelledby="kw">
+                            </ul>
+                        </div>
+                        <div class="toc-actions wikidocs-reader-toc-actions">
+                            
+                                <button class="btn btn-xs btn-default find-btn" style="margin-top:12px;">
+                                    <i class="glyphicon glyphicon-search" title="찾기"></i>
+                                </button>
+                                <button class="btn btn-xs btn-default menu_link menu-toggle"
+                                        style="margin-top:12px">
+                                    <i class="glyphicon glyphicon-menu-hamburger" title="사이드바 토글"></i>
+                                </button>
+                                <a href="/"
+                                   class="btn btn-xs btn-default home-btn"
+                                   style="margin-right:20px;
+                                          margin-top:12px">
+                                    <i class="glyphicon glyphicon-home" title="위키독스"></i>
+                                </a>
+                            
+                            
+                                <button type="button"
+                                        class="btn btn-xs btn-default wikidocs-reader-toc-close"
+                                        aria-label="책 목차 닫기"
+                                        data-wikidocs-mobile-toc-close>
+                                    <i class="glyphicon glyphicon-remove" aria-hidden="true"></i>
+                                </button>
+                            
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="list-group list-group-toc" style="margin:0;">
+                <a class="list-group-item book-title "
+                   href="/book/1"
+                   style="margin:0">
+                    <span style="white-space:nowrap;
+                                 overflow:hidden;
+                                 display:block"
+                          title="점프 투 파이썬">
+                        
+                            <i class="glyphicon glyphicon-book"></i>
+                        
+                        <strong>점프 투 파이썬</strong>
+                    </span>
+                    
+                </a>
+                <div class="scrollable-content">
+                    
+                        <a href="/2"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="2"
+                           data-parent-id=""
+                           data-depth="0"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="00장 들어가기 전에">
+                                <span style="padding-left:0px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    00장 들어가기 전에
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/4319"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="4319"
+                           data-parent-id="2"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="00-1 머리말">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    00-1 머리말
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/4320"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="4320"
+                           data-parent-id="2"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="00-2 저자소개">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    00-2 저자소개
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/202337"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="202337"
+                           data-parent-id="2"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="00-3 동영상 강의">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    00-3 동영상 강의
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/202412"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="202412"
+                           data-parent-id="2"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="00-4 소스 코드">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    00-4 소스 코드
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/4321"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="4321"
+                           data-parent-id="2"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="00-5 책 구입 안내">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    00-5 책 구입 안내
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/742"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="742"
+                           data-parent-id="2"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="00-6 주요변경이력">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    00-6 주요변경이력
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/5"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="5"
+                           data-parent-id=""
+                           data-depth="0"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="01장 파이썬이란 무엇인가?">
+                                <span style="padding-left:0px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    01장 파이썬이란 무엇인가?
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/4307"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="4307"
+                           data-parent-id="5"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="01-1 파이썬이란?">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    01-1 파이썬이란?
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/6"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="6"
+                           data-parent-id="5"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="01-2 파이썬의 특징">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    01-2 파이썬의 특징
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/7"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="7"
+                           data-parent-id="5"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="01-3 파이썬으로 무엇을 할 수 있을까?">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    01-3 파이썬으로 무엇을 할 수 있을까?
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/8"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="8"
+                           data-parent-id="5"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="01-4 파이썬 설치하기">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    01-4 파이썬 설치하기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/9"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="9"
+                           data-parent-id="5"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="01-5 파이썬 둘러보기">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    01-5 파이썬 둘러보기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/17684"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="17684"
+                           data-parent-id="5"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="01-6 파이썬과 에디터">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    01-6 파이썬과 에디터
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/11"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="11"
+                           data-parent-id=""
+                           data-depth="0"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="02장 파이썬 프로그래밍의 기초, 자료형">
+                                <span style="padding-left:0px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    02장 파이썬 프로그래밍의 기초, 자료형
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/12"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="12"
+                           data-parent-id="11"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="02-1 숫자형">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    02-1 숫자형
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/13"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="13"
+                           data-parent-id="11"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="02-2 문자열 자료형">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    02-2 문자열 자료형
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/14"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="14"
+                           data-parent-id="11"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="02-3 리스트 자료형">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    02-3 리스트 자료형
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/15"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="15"
+                           data-parent-id="11"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="02-4 튜플 자료형">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    02-4 튜플 자료형
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/16"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="16"
+                           data-parent-id="11"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="02-5 딕셔너리 자료형">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    02-5 딕셔너리 자료형
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/1015"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="1015"
+                           data-parent-id="11"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="02-6 집합 자료형">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    02-6 집합 자료형
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/17"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="17"
+                           data-parent-id="11"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="02-7 불 자료형">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    02-7 불 자료형
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/18"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="18"
+                           data-parent-id="11"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="02-8 자료형의 값을 저장하는 공간, 변수">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    02-8 자료형의 값을 저장하는 공간, 변수
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/180351"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="180351"
+                           data-parent-id="11"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="02장 되새김 문제">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    02장 되새김 문제
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/19"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="19"
+                           data-parent-id=""
+                           data-depth="0"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="03장 프로그램의 구조를 쌓는다! 제어문">
+                                <span style="padding-left:0px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    03장 프로그램의 구조를 쌓는다! 제어문
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/20"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="20"
+                           data-parent-id="19"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="03-1 if문">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    03-1 if문
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/21"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="21"
+                           data-parent-id="19"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="03-2 while문">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    03-2 while문
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/22"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="22"
+                           data-parent-id="19"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="03-3 for문">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    03-3 for문
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/180354"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="180354"
+                           data-parent-id="19"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="03장 되새김 문제">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    03장 되새김 문제
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/23"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="23"
+                           data-parent-id=""
+                           data-depth="0"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="04장 파이썬의 입출력">
+                                <span style="padding-left:0px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    04장 파이썬의 입출력
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/24"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="24"
+                           data-parent-id="23"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="04-1 함수">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    04-1 함수
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/25"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="25"
+                           data-parent-id="23"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="04-2 사용자 입출력">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    04-2 사용자 입출력
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/26"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="26"
+                           data-parent-id="23"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="04-3 파일 읽고 쓰기">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    04-3 파일 읽고 쓰기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/180507"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="180507"
+                           data-parent-id="23"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="04-4 프로그램의 입출력">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    04-4 프로그램의 입출력
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/180356"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="180356"
+                           data-parent-id="23"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="04장 되새김 문제">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    04장 되새김 문제
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/27"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="27"
+                           data-parent-id=""
+                           data-depth="0"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="05장 파이썬 날개 달기">
+                                <span style="padding-left:0px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    05장 파이썬 날개 달기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/28"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="28"
+                           data-parent-id="27"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="05-1 클래스">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    05-1 클래스
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/29"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="29"
+                           data-parent-id="27"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="05-2 모듈">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    05-2 모듈
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/1418"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="1418"
+                           data-parent-id="27"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="05-3 패키지">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    05-3 패키지
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/30"
+                           class="list-group-item toc-item active"
+                           data-wikidocs-reader-link
+                           data-id="30"
+                           data-parent-id="27"
+                           data-depth="1"
+                           aria-current="page">
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="05-4 예외 처리">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    05-4 예외 처리
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/32"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="32"
+                           data-parent-id="27"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="05-5 내장 함수">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    05-5 내장 함수
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/33"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="33"
+                           data-parent-id="27"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="05-6 표준 라이브러리">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    05-6 표준 라이브러리
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/180538"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="180538"
+                           data-parent-id="27"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="05-7 외부 라이브러리">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    05-7 외부 라이브러리
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/180359"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="180359"
+                           data-parent-id="27"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="05장 되새김 문제">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    05장 되새김 문제
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/34"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="34"
+                           data-parent-id=""
+                           data-depth="0"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="06장 파이썬 프로그래밍, 어떻게 시작해야 할까?">
+                                <span style="padding-left:0px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    06장 파이썬 프로그래밍, 어떻게 시작해야 할까?
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/35"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="35"
+                           data-parent-id="34"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="06-1 내가 프로그램을 만들 수 있을까?">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    06-1 내가 프로그램을 만들 수 있을까?
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/40"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="40"
+                           data-parent-id="34"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="06-2 3과 5의 배수를 모두 더하기">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    06-2 3과 5의 배수를 모두 더하기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/38"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="38"
+                           data-parent-id="34"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="06-3 게시판 페이징하기">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    06-3 게시판 페이징하기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/36"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="36"
+                           data-parent-id="34"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="06-4 간단한 메모장 만들기">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    06-4 간단한 메모장 만들기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/337206"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="337206"
+                           data-parent-id="34"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="06-5 숫자 야구 게임 만들기">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    06-5 숫자 야구 게임 만들기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/337212"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="337212"
+                           data-parent-id="34"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="06-6 시저 암호 만들기">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    06-6 시저 암호 만들기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/184208"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="184208"
+                           data-parent-id=""
+                           data-depth="0"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="07장 파이썬 날아오르기">
+                                <span style="padding-left:0px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    07장 파이썬 날아오르기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/184209"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="184209"
+                           data-parent-id="184208"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="07-1 파이썬과 유니코드">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    07-1 파이썬과 유니코드
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/184210"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="184210"
+                           data-parent-id="184208"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="07-2 클로저와 데코레이터">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    07-2 클로저와 데코레이터
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/184211"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="184211"
+                           data-parent-id="184208"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="07-3 이터레이터와 제너레이터">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    07-3 이터레이터와 제너레이터
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/184212"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="184212"
+                           data-parent-id="184208"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="07-4 파이썬 타입 어노테이션">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    07-4 파이썬 타입 어노테이션
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/1669"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="1669"
+                           data-parent-id=""
+                           data-depth="0"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="08장 정규표현식">
+                                <span style="padding-left:0px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    08장 정규표현식
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/1642"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="1642"
+                           data-parent-id="1669"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="08-1 정규 표현식 살펴보기">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    08-1 정규 표현식 살펴보기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/4308"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="4308"
+                           data-parent-id="1669"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="08-2 정규 표현식 시작하기">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    08-2 정규 표현식 시작하기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/4309"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="4309"
+                           data-parent-id="1669"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="08-3 강력한 정규 표현식의 세계로">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    08-3 강력한 정규 표현식의 세계로
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/202338"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="202338"
+                           data-parent-id=""
+                           data-depth="0"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="09장 부록">
+                                <span style="padding-left:0px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    09장 부록
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/180361"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="180361"
+                           data-parent-id="202338"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="09-1 파이썬 코딩 면허 시험 20제">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    09-1 파이썬 코딩 면허 시험 20제
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/193066"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="193066"
+                           data-parent-id="202338"
+                           data-depth="1"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="09-2 AI와 함께 파이썬 공부하기">
+                                <span style="padding-left:20px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    09-2 AI와 함께 파이썬 공부하기
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/180362"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="180362"
+                           data-parent-id=""
+                           data-depth="0"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="10장 정답 및 풀이">
+                                <span style="padding-left:0px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    10장 정답 및 풀이
+                                </span>
+                            </span>
+                        </a>
+                    
+                        <a href="/78308"
+                           class="list-group-item toc-item "
+                           data-wikidocs-reader-link
+                           data-id="78308"
+                           data-parent-id=""
+                           data-depth="0"
+                           >
+                            <span style="white-space:nowrap;
+                                         overflow:hidden;
+                                         display:block"
+                                  title="마치며.">
+                                <span style="padding-left:0px">
+                                    <span class="toc-toggle"></span>
+                                    
+                                    
+                                    마치며.
+                                </span>
+                            </span>
+                        </a>
+                    
+                </div>
+            </div>
+        </div>
+        <input type="hidden" name="request_mobile" id="request_mobile" value="0" />
+    </div>
+</div>
+</div>
+        <div class="page col-sm-offset-3 col-sm-9 wikidocs-reader-main"
+             id="load_content"
+             style="margin-top:10px"><div data-wikidocs-reader-content
+     data-page-id="30"
+     data-is-author="false">
+    
+    
+
+
+
+
+
+
+
+
+
+
+<div class="clearfix page-depth">
+    <ol class="breadcrumb pull-left">
+        <li>
+            <small><a href="/book/1"><i class="glyphicon glyphicon-book"></i> <strong>점프 투 파이썬</strong></a></small>
+        </li>
+        
+            <li>
+                <small><a href="/27" data-wikidocs-reader-link>05장 파이썬 날개 달기</a></small>
+            </li>
+        
+            <li>
+                <small><a href="/30" data-wikidocs-reader-link>05-4 예외 처리</a></small>
+            </li>
+        
+    </ol>
+    
+        <ol class="breadcrumb pull-right">
+            
+
+            
+
+            <li>
+                <a href="/"><small class="logo"><i class="glyphicon glyphicon-home"></i> 위키독스</small></a>
+            </li>
+        </ol>
+    
+</div>
+
+<div class="page-header-wrapper">
+    <h1 class="page-subject">
+        <span class="page-subject-text">05-4 예외 처리</span>
+        <span class="page-subject-actions">
+            
+                <a href="#top"
+                   class="btn btn-default btn-sm page-back-to-top"
+                   style="display: none"
+                   title="맨위로"><i class="glyphicon glyphicon-arrow-up"></i></a>
+            
+            <a href="javascript:togglePageToc();"
+               class="btn btn-default btn-sm"
+               title="목차 보기"><i class="glyphicon glyphicon-list"></i></a>
+            
+                
+            
+        </span>
+    </h1>
+    <!-- 스크롤 진행 표시기 -->
+    <div class="scroll-progress-container" id="scrollProgressContainer">
+        <div class="scroll-progress-bar" id="scrollProgressBar"></div>
+    </div>
+    <div id="page-toc-container"
+         class="page-toc-container"
+         style="display: none">
+        <div class="page-toc-content"></div>
+    </div>
+</div>
+<!-- google adsense -->
+
+    <!-- PC -->
+
+    
+        
+            <div class="wikidocs-ad-block wikidocs-ad-top-block" style="margin:30px 0">
+                <div class="clearfix ad-container"
+     style="display: flex;
+            justify-content: flex-start">
+    <div class="first-ad ad-container" style="margin-right: 30px;">
+        
+            <div class="ad-wrapper adv_wikidocs_top">
+                <div class="ad-placeholder">
+                    광고가 출력될 위치입니다.
+                </div>
+                <script async
+                        src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9470517771012578"
+                        crossorigin="anonymous"></script>
+                <!-- 페이지상단임시 -->
+                <ins class="adsbygoogle wikidocs-ad"
+                     style="display:inline-block;
+                            width:336px;
+                            height:280px"
+                     data-ad-client="ca-pub-9470517771012578"
+                     data-ad-slot="7169354980"></ins>
+                <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+            </div>
+        
+    </div>
+    <div class="second-ad ad-container">
+        
+            <div class="ad-wrapper adv_wikidocs_top">
+                <div class="ad-placeholder">
+                    광고가 출력될 위치입니다.
+                </div>
+                <script async
+                        src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9470517771012578"
+                        crossorigin="anonymous"></script>
+                <!-- 페이지상단임시 -->
+                <ins class="adsbygoogle wikidocs-ad"
+                     style="display:inline-block;
+                            width:336px;
+                            height:280px"
+                     data-ad-client="ca-pub-9470517771012578"
+                     data-ad-slot="7169354980"></ins>
+                <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+            </div>
+        
+    </div>
+</div>
+
+            </div>
+        
+    
+
+<!-- Mobile -->
+
+
+
+<!-- google adsense -->
+<div class="page-content tex2jax_process book-content-font-normal">
+    
+        
+        
+            
+            <p>프로그램을 만들다 보면 수없이 많은 오류를 만나게 된다. 물론 오류가 발생하는 이유는 프로그램이 잘못 동작하는 것을 막기 위한 파이썬의 배려이다. 이번에는 파이썬에서 오류를 처리하는 방법에 대해 알아보자.</p>
+<div class="toc">
+<ul>
+<li><a href="#_1">오류는 언제 발생하는가?</a></li>
+<li><a href="#_2">오류 예외 처리 기법</a><ul>
+<li><a href="#try-except">try-except 문</a></li>
+<li><a href="#try-finally">try-finally 문</a></li>
+<li><a href="#_3">여러 개의 오류 처리하기</a></li>
+<li><a href="#try-else">try-else 문</a></li>
+</ul>
+</li>
+<li><a href="#_4">오류 회피하기</a></li>
+<li><a href="#_5">오류 일부러 발생시키기</a></li>
+<li><a href="#_6">예외 만들기</a></li>
+</ul>
+</div>
+<h2 id="_1">오류는 언제 발생하는가?</h2>
+<p>오류를 처리하는 방법을 공부하기 전에 어떤 상황에서 오류가 발생하는지 알아보자. 오타를 입력했을 때 발생하는 구문 오류가 아닌, 실제 프로그램에서 자주 발생하는 오류를 중심으로 살펴보자.</p>
+<p>먼저 존재하지 않는 파일을 열려고 할 때 발생하는 오류이다.</p>
+<pre><code class="language-python">&gt;&gt;&gt; f = open("나없는파일", 'r')
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+FileNotFoundError: [Errno 2] No such file or directory: '나없는파일'
+</code></pre>
+<p>위 예에서 볼 수 있듯이 없는 파일을 열려고 시도하면 FileNotFoundError 오류가 발생한다.</p>
+<p>이번에는 0으로 다른 숫자를 나누는 경우를 살펴보자.</p>
+<pre><code class="language-python">&gt;&gt;&gt; 4 / 0
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+ZeroDivisionError: division by zero
+</code></pre>
+<p>4를 0으로 나누려고 하니 ZeroDivisionError 오류가 발생한다.</p>
+<p>마지막으로 한 가지 예를 더 들어 보자. 다음 오류는 정말 자주 발생한다.</p>
+<pre><code class="language-python">&gt;&gt;&gt; a = [1, 2, 3]
+&gt;&gt;&gt; a[3]
+Traceback (most recent call last):
+  File "&lt;stdin&gt;", line 1, in &lt;module&gt;
+IndexError: list index out of range
+</code></pre>
+<p>a[3]은 a의 네 번째 요솟값을 가리키는데, a 리스트에는 값이 3개밖에 없으므로([1, 2, 3]) 값을 얻을 수 없다. 따라서 IndexError 오류가 발생한다. 파이썬은 이런 오류가 발생하면 프로그램을 중단하고 오류 메시지를 보여 준다.</p>
+<h2 id="_2">오류 예외 처리 기법</h2>
+<p>이제 유연한 프로그래밍을 위한 오류 처리 방법에 대해 알아보자.</p>
+<h3 id="try-except">try-except 문</h3>
+<p>다음은 오류를 처리하기 위한 try-except 문의 기본 구조이다.</p>
+<pre><code class="language-python">try:
+    ...
+except [발생오류 [as 오류변수]]:
+    ...
+</code></pre>
+<p>try 블록 수행 중 오류가 발생하면 except 블록이 수행된다. 하지만 try 블록에서 오류가 발생하지 않는다면 except 블록은 수행되지 않는다.</p>
+<p>except 구문을 자세히 살펴보자.</p>
+<pre><code class="language-plaintext">except [발생오류 [as 오류변수]]:
+</code></pre>
+<p>위 구문에서 <code>[]</code>는 괄호 안의 내용을 생략할 수 있다는 관례적인 표기법이다. 파이썬의 리스트를 뜻하는 대괄호가 아니라, 문법을 설명할 때 "이 부분은 써도 되고 안 써도 된다"는 의미이다. 즉, except 구문은 다음 3가지 방법으로 사용할 수 있다.</p>
+<p><strong>1. try-except만 쓰는 방법</strong></p>
+<pre><code class="language-python">try:
+    ...
+except:
+    ...
+</code></pre>
+<p>이 경우에는 오류의 종류에 상관없이 오류가 발생하면 except 블록을 수행한다.</p>
+<p><strong>2. 발생 오류만 포함한 except 문</strong></p>
+<pre><code class="language-python">try:
+    ...
+except 발생오류:
+    ...
+</code></pre>
+<p>이 경우는 오류가 발생했을 때 except 문에 지정한 오류와 동일한 오류일 경우에만 except 블록을 수행한다.</p>
+<p><strong>3. 발생 오류와 오류 변수까지 포함한 except 문</strong></p>
+<div class="ad-wrapper markdown_tags">
+<script async="" crossorigin="anonymous" src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9470517771012578"></script>
+<!-- markdown_tags -->
+<ins class="adsbygoogle" data-ad-client="ca-pub-9470517771012578" data-ad-format="false" data-ad-slot="4124294444" data-full-width-responsive="false" style="display:inline-block;width:300px;height:250px"></ins>
+<script>
+                        (adsbygoogle = window.adsbygoogle || []).push({});
+                    </script>
+</div>
+<pre><code class="language-python">try:
+    ...
+except 발생오류 as 오류변수:
+    ...
+</code></pre>
+<p>이 경우는 두 번째 경우에서 오류의 내용까지 알고 싶을 때 사용한다.</p>
+<p>다음은 이 방법을 사용한 예이다.</p>
+<pre><code class="language-python"># try_except.py
+try:
+    4 / 0
+except ZeroDivisionError as e:
+    print(e)
+</code></pre>
+<p>위처럼 4를 0으로 나누려고 하면 ZeroDivisionError가 발생하여 except 블록이 실행되고, 오류 변수 e에 담긴 오류 메시지를 출력할 수 있다. 출력되는 오류 메시지는 다음과 같다.</p>
+<pre><code class="language-plaintext">division by zero
+</code></pre>
+<h3 id="try-finally">try-finally 문</h3>
+<p>try 문에는 finally 절을 사용할 수 있다. finally 절은 try 문 수행 도중 예외 발생 여부에 상관없이 항상 수행된다. 보통 finally 절은 사용한 리소스를 close해야 할 때 많이 사용한다.</p>
+<p>다음 예를 살펴보자.</p>
+<pre><code class="language-python"># try_finally.py
+try:
+    f = open('foo.txt', 'w')
+    # 무언가를 수행한다.
+
+    (... 생략 ...)
+
+finally:
+    f.close()  # 중간에 오류가 발생하더라도 무조건 실행된다.
+</code></pre>
+<p>foo.txt 파일을 쓰기 모드로 연 후 예외 발생 여부에 상관없이 항상 파일을 닫아 주려면 try-finally 문을 사용하면 된다.</p>
+<p>finally 절이 실제로 어떻게 동작하는지 좀 더 구체적인 예를 살펴보자.</p>
+<pre><code class="language-python"># try_finally2.py
+try:
+    print("나누기 전")
+    4 / 0
+    print("나누기 후")
+except ZeroDivisionError:
+    print("오류가 발생했습니다.")
+finally:
+    print("finally 실행!")
+</code></pre>
+<p>위 코드를 실행하면 다음과 같이 출력된다.</p>
+<pre><code class="language-plaintext">나누기 전
+오류가 발생했습니다.
+finally 실행!
+</code></pre>
+<p><code>4 / 0</code>에서 오류가 발생했지만 finally 절은 실행된 것을 확인할 수 있다. 오류가 발생하지 않더라도 finally 절은 항상 실행된다.</p>
+<h3 id="_3">여러 개의 오류 처리하기</h3>
+<p>try 문 안에서 여러 개의 오류를 처리하려면 다음과 같이 작성한다.</p>
+<pre><code class="language-python">try:
+    ...
+except 발생오류1:
+   ... 
+except 발생오류2:
+   ...
+</code></pre>
+<p>즉, 0으로 나누는 오류와 인덱싱 오류를 다음과 같이 처리할 수 있다.</p>
+<pre><code class="language-python"># many_error.py
+try:
+    a = [1,2]
+    print(a[3])
+    4/0
+except ZeroDivisionError:
+    print("0으로 나눌 수 없습니다.")
+except IndexError:
+    print("인덱싱 할 수 없습니다.")
+</code></pre>
+<p>a는 2개의 요솟값을 가지고 있으므로 a[3]이 IndexError를 발생시켜 "인덱싱 할 수 없습니다."라는 문자열을 출력한다. 인덱싱 오류가 먼저 발생했으므로 <code>4 / 0</code>에 따른 ZeroDivisionError 오류는 발생하지 않는다.</p>
+<p>앞에서 알아본 것과 마찬가지로 오류 메시지도 다음과 같이 확인할 수 있다.</p>
+<pre><code class="language-python">try:
+    a = [1,2]
+    print(a[3])
+    4/0
+except ZeroDivisionError as e:
+    print(e)
+except IndexError as e:
+    print(e)
+</code></pre>
+<p>프로그램을 실행하면 'list index out of range'라는 오류 메시지가 출력될 것이다.</p>
+<p>다음과 같이 ZeroDivisionError와 IndexError를 함께 처리할 수도 있다.</p>
+<pre><code class="language-python">try:
+    a = [1,2]
+    print(a[3])
+    4/0
+except (ZeroDivisionError, IndexError) as e:
+    print(e)
+</code></pre>
+<p>2개 이상의 오류를 동일하게 처리하려면 위와 같이 괄호를 사용하여 함께 묶어 처리하면 된다.</p>
+<h3 id="try-else">try-else 문</h3>
+<p>try 문에는 다음처럼 else 절을 사용할 수도 있다.</p>
+<div class="ad-wrapper markdown_tags">
+<script async="" crossorigin="anonymous" src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9470517771012578"></script>
+<!-- markdown_tags -->
+<ins class="adsbygoogle" data-ad-client="ca-pub-9470517771012578" data-ad-format="false" data-ad-slot="4124294444" data-full-width-responsive="false" style="display:inline-block;width:300px;height:250px"></ins>
+<script>
+                        (adsbygoogle = window.adsbygoogle || []).push({});
+                    </script>
+</div>
+<pre><code class="language-python">try:
+    ...
+except [발생오류 [as 오류변수]]:
+    ...
+else:  # 오류가 없을 경우에만 수행
+    ...
+</code></pre>
+<p>try 문 수행 중 오류가 발생하면 except 절이, 오류가 발생하지 않으면 else 절이 수행된다.</p>
+<blockquote>
+<p>"try 블록 안에 그냥 넣으면 되지 않나?"라고 생각할 수 있다. 하지만 else 절에 넣은 코드는 except의 대상이 되지 않는다. 따라서 try 블록에서 발생할 수 있는 오류만 정확히 잡고, 나머지 코드에서 발생하는 의도치 않은 오류가 except에 잡히는 것을 방지할 수 있다.</p>
+</blockquote>
+<p>다음은 try 문에 else 절을 사용한 간단한 예제이다.</p>
+<pre><code class="language-python"># try_else.py
+try:
+    age=int(input('나이를 입력하세요: '))
+except:
+    print('입력이 정확하지 않습니다.')
+else:
+    if age &lt;= 18:
+        print('미성년자는 출입금지입니다.')
+    else:
+        print('환영합니다.')
+</code></pre>
+<p>'나이를 입력하세요: '라는 질문에 숫자가 아닌 다른 값을 입력하면 오류가 발생하여 '입력이 정확하지 않습니다.'라는 문장을 출력한다. 오류가 없을 경우에만 else 절이 수행된다.</p>
+<h2 id="_4">오류 회피하기</h2>
+<p>코드를 작성하다 보면 특정 오류가 발생해도 그냥 통과시켜야 할 때가 있다. 예를 들어, 여러 파일을 처리하는 중에 일부 파일이 없더라도 프로그램을 계속 실행하고 싶을 때가 있다.</p>
+<p>다음은 학생들의 성적 파일을 읽어서 처리하는 예제이다.</p>
+<pre><code class="language-python"># process_scores.py
+students = ["김철수", "이영희", "박민수", "최유진"]
+
+for student in students:
+    try:
+        with open(f"{student}_성적.txt", 'r') as f:
+            score = f.read()
+            print(f"{student}의 성적: {score}")
+    except FileNotFoundError:
+        print(f"{student}의 성적 파일이 없습니다. 건너뜁니다.")
+        continue  # 다음 학생으로 넘어감
+</code></pre>
+<p>위 코드에서 일부 학생의 성적 파일이 없어도 프로그램이 중단되지 않고 다른 학생들의 성적을 계속 처리할 수 있다.</p>
+<p>때로는 오류를 완전히 무시하고 싶을 때도 있다. 이럴 때 pass를 사용한다.</p>
+<pre><code class="language-python"># error_pass.py
+try:
+    # 설정 파일을 읽으려 시도
+    with open("설정파일.txt", 'r') as f:
+        config = f.read()
+except FileNotFoundError:
+    pass  # 설정 파일이 없어도 계속 진행
+
+# 프로그램의 주요 기능은 계속 수행
+print("프로그램이 정상적으로 실행됩니다.")
+</code></pre>
+<p>pass를 사용하면 오류가 발생해도 프로그램이 중단되지 않고 계속 진행된다. 하지만 pass는 신중하게 사용해야 한다. 중요한 오류까지 무시하면 나중에 더 큰 문제가 될 수 있기 때문이다.</p>
+<h2 id="_5">오류 일부러 발생시키기</h2>
+<p>이상하게 들리겠지만, 프로그래밍을 하다 보면 오류를 일부러 발생시켜야 할 경우도 있다. 파이썬은 raise 문을 사용해 오류를 강제로 발생시킬 수 있다.</p>
+<p>왜 일부러 오류를 발생시킬까? 예를 들어 여러 명이 함께 작업할 때, 자식 클래스가 반드시 구현해야 할 기능을 깜빡하고 빠뜨리는 실수를 방지하기 위해서이다. 오류를 일부러 발생시키면 "이 기능을 아직 구현하지 않았다"는 사실을 바로 알 수 있다.</p>
+<p>예를 들어 Bird 클래스를 상속받는 자식 클래스는 반드시 fly라는 함수를 구현하도록 만들고 싶은 경우가 있을 수 있다. 다음 예를 살펴보자.</p>
+<pre><code class="language-python"># error_raise.py
+class Bird:
+    def fly(self):
+        raise NotImplementedError
+</code></pre>
+<p>Bird 클래스를 상속받는 자식 클래스는 반드시 fly 함수를 구현해야 한다는 의지를 보여 준다. 만약 자식 클래스가 fly 함수를 구현하지 않은 상태로 fly 함수를 호출한다면 어떻게 될까?</p>
+<blockquote>
+<p>NotImplementedError는 파이썬에 이미 정의되어 있는 오류로, 꼭 작성해야 하는 부분이 구현되지 않았을 경우 일부러 오류를 발생시키기 위해 사용한다.</p>
+</blockquote>
+<pre><code class="language-python">class Eagle(Bird):
+    pass
+
+eagle = Eagle()
+eagle.fly()
+</code></pre>
+<p>Eagle 클래스는 Bird 클래스를 상속받았다. 그런데 Eagle 클래스는 fly 메서드를 오버라이딩하여 구현하지 않았다. 따라서 eagle 객체의 fly 메서드를 수행하는 순간 Bird 클래스의 fly 메서드가 수행되어 NotImplementedError가 발생한다.</p>
+<pre><code class="language-plaintext">Traceback (most recent call last):
+  File "...", line 33, in &lt;module&gt;
+    eagle.fly()
+  File "...", line 26, in fly
+    raise NotImplementedError
+NotImplementedError
+</code></pre>
+<blockquote>
+<p>상속받는 클래스에서 메서드를 재구현하는 것을 '메서드 오버라이딩'이라고 한다.</p>
+</blockquote>
+<p>NotImplementedError가 발생하지 않게 하려면 다음과 같이 Eagle 클래스에 fly 함수를 구현해야 한다.</p>
+<pre><code class="language-python">class Eagle(Bird):
+    def fly(self):
+        print("very fast")
+
+eagle = Eagle()
+eagle.fly()
+</code></pre>
+<p>위 예처럼 fly 함수를 구현한 후 프로그램을 실행하면 오류 없이 다음 문장이 출력된다.</p>
+<div class="ad-wrapper markdown_tags">
+<script async="" crossorigin="anonymous" src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9470517771012578"></script>
+<!-- markdown_tags -->
+<ins class="adsbygoogle" data-ad-client="ca-pub-9470517771012578" data-ad-format="false" data-ad-slot="4124294444" data-full-width-responsive="false" style="display:inline-block;width:300px;height:250px"></ins>
+<script>
+                        (adsbygoogle = window.adsbygoogle || []).push({});
+                    </script>
+</div>
+<pre><code class="language-plaintext">very fast
+</code></pre>
+<h2 id="_6">예외 만들기</h2>
+<p>프로그램을 수행하다가 특수한 경우에만 예외 처리를 하려고 종종 예외를 직접 만들어서 사용한다. 이번에는 직접 예외를 만들어 보자.</p>
+<p>예외는 다음과 같이 파이썬 내장 클래스인 Exception 클래스를 상속하여 만들 수 있다.</p>
+<pre><code class="language-python"># error_make.py
+class MyError(Exception):
+    pass
+</code></pre>
+<p>그리고 별명을 출력하는 함수를 다음과 같이 작성해 보자.</p>
+<pre><code class="language-python">def say_nick(nick):
+    if nick == '바보':
+        raise MyError()
+    print(nick)
+</code></pre>
+<p>다음과 같이 say_nick 함수를 호출해 보자.</p>
+<pre><code class="language-python">say_nick("천사")
+say_nick("바보")
+</code></pre>
+<p>저장한 후 프로그램을 실행해 보면 다음과 같이 "천사"가 한 번 출력된 후 MyError가 발생한다.</p>
+<pre><code class="language-plaintext">천사
+Traceback (most recent call last):
+  File "...", line 11, in &lt;module&gt;
+    say_nick("바보")
+  File "...", line 7, in say_nick
+    raise MyError()
+__main__.MyError
+</code></pre>
+<p>이번에는 예외 처리 기법을 사용하여 MyError 발생을 예외 처리해 보자. </p>
+<pre><code class="language-python">try:
+    say_nick("천사")
+    say_nick("바보")
+except MyError:
+    print("허용되지 않는 별명입니다.")
+</code></pre>
+<p>프로그램을 실행하면 다음과 같이 출력된다.</p>
+<pre><code class="language-plaintext">천사
+허용되지 않는 별명입니다.
+</code></pre>
+<p>만약 오류 메시지를 사용하고 싶다면 다음처럼 예외 처리를 하면 된다.</p>
+<pre><code class="language-python">try:
+    say_nick("천사")
+    say_nick("바보")
+except MyError as e:
+    print(e)
+</code></pre>
+<p>하지만 프로그램을 실행해 보면 <code>print(e)</code>로 오류 메시지가 출력되지 않는 것을 확인할 수 있다. MyError 클래스에 별도의 오류 메시지를 정의하지 않았으므로 빈 문자열이 출력되기 때문이다. 오류 메시지를 출력했을 때 오류 메시지가 보이게 하려면 오류 클래스에 다음과 같은 <code>__str__</code> 메서드를 구현해야 한다. <code>__str__</code> 메서드는 <code>print(e)</code>처럼 오류 메시지를 print 문으로 출력할 경우에 호출되는 메서드이다.</p>
+<pre><code class="language-python">class MyError(Exception):
+    def __str__(self):
+        return "허용되지 않는 별명입니다."
+</code></pre>
+<p>프로그램을 다시 실행해 보면 "허용되지 않는 별명입니다."라는 오류 메시지가 출력되는 것을 확인할 수 있을 것이다.</p>
+        
+    
+</div>
+<div class="muted text-right" style="font-size: 0.9em;margin:10px 0;">
+    
+        마지막 편집일시 : 2026년 3월 30일 8:16 오후
+    
+</div>
+
+<!-- google adsense -->
+
+    <!-- PC -->
+
+    
+        
+            <div class="wikidocs-ad-block" style="margin:30px 0;"><div class="clearfix ad-container"
+     style="display: flex;
+            justify-content: flex-start">
+    <div class="first-ad ad-container" style="margin-right: 30px;">
+        
+            <div class="ad-wrapper">
+                <div class="ad-placeholder">
+                    광고가 출력될 위치입니다.
+                </div>
+                <script async
+                        src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9470517771012578"
+                        crossorigin="anonymous"></script>
+                <ins class="adsbygoogle wikidocs-ad"
+                     style="display:inline-block;
+                            width:336px;
+                            height:280px"
+                     data-ad-client="ca-pub-9470517771012578"
+                     data-full-width-responsive="false"
+                     data-ad-format="false"
+                     data-ad-slot="6452842464"></ins>
+                <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+            </div>
+        
+    </div>
+    <div class="second-ad ad-container">
+        
+            <div class="ad-wrapper">
+                <div class="ad-placeholder">
+                    광고가 출력될 위치입니다.
+                </div>
+                <script async
+                        src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-9470517771012578"
+                        crossorigin="anonymous"></script>
+                <ins class="adsbygoogle wikidocs-ad"
+                     style="display:inline-block;
+                            width:336px;
+                            height:280px"
+                     data-ad-client="ca-pub-9470517771012578"
+                     data-full-width-responsive="false"
+                     data-ad-format="false"
+                     data-ad-slot="6452842464"></ins>
+                <script>(adsbygoogle = window.adsbygoogle || []).push({});</script>
+            </div>
+        
+    </div>
+</div>
+</div>
+        
+    
+
+<!-- Mobile -->
+
+
+
+<!-- google adsense -->
+<div class="clearfix">
+    <a href="javascript:show_comments();" class="label label-info">댓글 25</a>
+    <a href="#myModal"
+       data-toggle="modal"
+       title="피드백을 남겨주세요"
+       class="label label-info">피드백</a>
+</div>
+<div class="user_comments" style="display:none">
+    <div class="comments" id="page_all_comments">
+
+    
+        
+            <div style="margin:15px 0 10px 0; font-size:0.75em;">
+                <a href="javascript:get_all_page_comments(30)">댓글 15개 더 보기...</a>
+            </div>
+        
+        
+
+    <div class="comment comment_border_top">
+        <a name="comment_7778"></a>
+        <span style="white-space:pre-wrap;">MyError 같은 별도의 Exception 을 상속한 클래스를 만들지 않아도
+
+오류를 발생시키고 싶은 조건에다가 아래와 같이 적용해도 되네요.
+
+if 조건 :
+    raise Exception(&quot;원하는 오류 메세지&quot;)</span>
+        <span style="font-size:12px;color:#888;">
+            -
+            
+                <a class="menu_link" href="/profile/info/book/10428">Hanlim</a>,
+            
+            2020년 7월 28일 6:41 오후
+            
+        
+        
+    </span>
+</div>
+
+    <div class="comment comment_border_top">
+        <a name="comment_7881"></a>
+        <span style="white-space:pre-wrap;">#예외 만들기
+class MyError(Exception): #exception을 상속받아서 새로운 예외를 만듦
+    def __str__(self):
+        return &quot;허용되지 않는 별명입니다.&quot;
+def say_nick(nick):
+    if nick==&#x27;바보&#x27;:
+        raise MyError()
+    print(nick)
+try:
+    say_nick(&quot;천사&quot;)
+    say_nick(&quot;바보&quot;)
+except MyError as e:
+    print(e)
+raise문으로 MyError()클래스를 호출해서 강제로 오류를 발생시킨다고 이해하면 되는 건가요?
+그리고 except문이 실행될 때 MyError클래스의 객체는 e인가요?
+답변 부탁드립니다~
+</span>
+        <span style="font-size:12px;color:#888;">
+            -
+            
+                <a class="menu_link" href="/profile/info/book/10627">Awsome</a>,
+            
+            2020년 8월 11일 4:20 오후
+            
+        
+        
+    </span>
+</div>
+
+    <div class="comment comment_border_top">
+        <a name="comment_7883"></a>
+        <span style="white-space:pre-wrap;">@Awsome 님, 말씀하신게 맞습니다. 정확히 이해하셨네요.</span>
+        <span style="font-size:12px;color:#888;">
+            -
+            
+                <a class="menu_link" href="/profile/info/book/3">박응용</a>,
+            
+            2020년 8월 11일 5:50 오후
+            
+        
+        
+    </span>
+</div>
+
+    <div class="comment comment_border_top">
+        <a name="comment_8720"></a>
+        <span style="white-space:pre-wrap;">f = open(&#x27;foo.txt&#x27;, &#x27;w&#x27;)
+try:
+    # 무언가를 수행한다.
+finally:
+    f.close()
+
+이 문장을 그대로 적고 실행했는데 자꾸 finally 부분에서 expected an indented block 문구가 뜨면서 실행이 안돼요...
+둘다 탭으로 들여쓰기 했는데 혹시 뭐가 문제인가요?</span>
+        <span style="font-size:12px;color:#888;">
+            -
+            
+                <a class="menu_link" href="/profile/info/book/11352">최상봉</a>,
+            
+            2020년 11월 30일 11:53 오후
+            
+        
+        
+    </span>
+</div>
+
+    <div class="comment comment_border_top">
+        <a name="comment_8873"></a>
+        <span style="white-space:pre-wrap;">@최상봉님, &quot;# 무언가를 수행한다.&quot; 부분에 아무코드라도 입력하셔야 합니다.</span>
+        <span style="font-size:12px;color:#888;">
+            -
+            
+                <a class="menu_link" href="/profile/info/book/3">박응용</a>,
+            
+            2020년 12월 9일 12:18 오전
+            
+        
+        
+    </span>
+</div>
+
+    <div class="comment comment_border_top">
+        <a name="comment_12928"></a>
+        <span style="white-space:pre-wrap;">try:
+    a = [1,2]
+    print(a[3])
+    4/0
+except (ZeroDivisionError, IndexError) as e:
+    print(e)
+
+
+2개 이상의 오류를 동시에 처리라고 되어있는데  이문장을 실행하면
+list index out of range 1개만 뜨는데 어떻게 해야 2개가 뜰까요?</span>
+        <span style="font-size:12px;color:#888;">
+            -
+            
+                <a class="menu_link" href="/profile/info/book/15039">coding</a>,
+            
+            2022년 1월 25일 11:36 오전
+            
+        
+        
+    </span>
+</div>
+
+    <div class="comment comment_border_top">
+        <a name="comment_12929"></a>
+        <span style="white-space:pre-wrap;">@coding님 코드진행상 IndexError 발생시 4/0은 실행이 되지 않기 때문에 두 개 동시에 출력은 불가능 합니다. 아니면 각각 따로 예외를 처리하셔야 합니다.</span>
+        <span style="font-size:12px;color:#888;">
+            -
+            
+                <a class="menu_link" href="/profile/info/book/3">박응용</a>,
+            
+            2022년 1월 25일 12:25 오후
+            
+        
+        
+    </span>
+</div>
+
+    <div class="comment comment_border_top">
+        <a name="comment_12932"></a>
+        <span style="white-space:pre-wrap;">@박응용님 실시간으로 달아주시고 너무 감사합니다!
+</span>
+        <span style="font-size:12px;color:#888;">
+            -
+            
+                <a class="menu_link" href="/profile/info/book/15039">coding</a>,
+            
+            2022년 1월 25일 7:44 오후
+            
+        
+        
+    </span>
+</div>
+
+    <div class="comment comment_border_top">
+        <a name="comment_13315"></a>
+        <span style="white-space:pre-wrap;">try:
+    a = [1,2]
+    print(a[3])
+    4/0
+except (ZeroDivisionError, IndexError) as e:
+    print(e)
+
+본문에서 이거 실행해봤는데
+list index out of range 밖에 안뜨는데 뭐가 잘못된 거죠?</span>
+        <span style="font-size:12px;color:#888;">
+            -
+            
+                <a class="menu_link" href="/profile/info/book/16044">수</a>,
+            
+            2022년 5월 26일 1:13 오전
+            
+        
+        
+    </span>
+</div>
+
+    <div class="comment comment_border_top">
+        <a name="comment_13316"></a>
+        <span style="white-space:pre-wrap;">@수님 잘못된게 아니라 맞는 결과입니다. 두 개의 에러 처리를 동일하게 한다는 의미입니다.</span>
+        <span style="font-size:12px;color:#888;">
+            -
+            
+                <a class="menu_link" href="/profile/info/book/3">박응용</a>,
+            
+            2022년 5월 26일 1:34 오전
+            
+        
+        
+    </span>
+</div>
+
+
+    
+
+</div>
+    
+        <a href="/loginForm" class="text-info" style="font-size:12px">※ 댓글 작성은 로그인이 필요합니다.</a>
+        <a href="#myModal" data-toggle="modal" style="font-size:12px">(또는 피드백을 이용해 주세요.)</a>
+    
+</div>
+<div class="page-prev-next">
+<div class="clearfix">
+    <div class="pull-left">
+        <ul>
+            
+                <li>
+                    <strong>이전글</strong> : <a class="prev_page_link"
+    href="/1418"
+    data-wikidocs-reader-link>05-3 패키지</a>
+                </li>
+            
+            
+                <li>
+                    <strong>다음글</strong> : <a class="next_page_link"
+    href="/32"
+    data-wikidocs-reader-link>05-5 내장 함수</a>
+                </li>
+            
+        </ul>
+    </div>
+</div>
+</div>
+
+</div>
+</div>
+    </div>
+    <div class="btn-group pull-right menu-group wikidocs-reader-menu-group"
+     role="group">
+    <button class="btn btn-xs btn-default menu_link menu-toggle">
+        <i class="glyphicon glyphicon-menu-hamburger" title="사이드바 토글"></i>
+    </button>
+</div>
+<div class="menu-wikidocs"></div>
+
+    <div style="display:none" class="prev_next_indicator">
+
+    <a class="prev_icon"
+       href="/1418"
+       role="button"
+       data-wikidocs-reader-link>
+        <span class="glyphicon glyphicon-chevron-left" style="font-size:2em;"></span>
+    </a>
+
+
+    <a class="next_icon"
+       href="/32"
+       role="button"
+       data-wikidocs-reader-link>
+        <span class="glyphicon glyphicon-chevron-right" style="font-size:2em;"></span>
+    </a>
+
+
+</div>
+    
+<!-- Modal -->
+<div id="myModal"
+     class="modal fade"
+     tabindex="-1"
+     role="dialog"
+     aria-labelledby="myModalLabel"
+     aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
+                <h3 id="myModalLabel" class="modal-title">이 페이지에 대한 피드백을 남겨주세요</h3>
+            </div>
+            <div class="modal-body">
+                <form class="form" role="form">
+                    <input type="hidden"
+                           name="page_id"
+                           id="feedback-page-id"
+                           value="30" />
+                    <div class="form-group">
+                        <label class="control-label" for="email">답장받을 이메일 주소</label>
+                        <div class="">
+                            <input class="form-control"
+                                   type="text"
+                                   id="email"
+                                   placeholder="Email"
+                                   >
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label class="control-label" for="feedback">하고 싶은 말</label>
+                        <div class="controls">
+                            <textarea class="form-control" id="feedback" rows="5"></textarea>
+                        </div>
+                    </div>
+                    <p style="font-size:12px;">※ 피드백은 저자에게 e-메일로 전달됩니다.</p>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-default" data-dismiss="modal">Close</button>
+                <button class="btn btn-primary" id="feedback_btn">전송하기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+    
+<!-- Modal -->
+<div id="reportModal"
+     class="modal fade"
+     tabindex="-1"
+     role="dialog"
+     aria-labelledby="reportModalLabel"
+     aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-hidden="true">&times;</button>
+                <h3 id="reportModalLabel" class="modal-title">댓글을 신고합니다.</h3>
+            </div>
+            <div class="modal-body">
+                <form class="form" role="form">
+                    <input type="hidden" name="comment_id" id="comment_id" />
+                    해당 댓글을 신고하시겠습니까? 댓글 신고는 다음과 같은 경우에 사용해주세요:
+                    <ol>
+                        <li>스팸 또는 광고성 내용이 포함된 경우</li>
+                        <li>욕설, 비방, 개인정보 유출 등 부적절한 내용이 포함된 경우</li>
+                        <li>저작권을 침해하는 내용이 포함된 경우</li>
+                    </ol>
+                    <div class="form-group">
+                        <label class="control-label" for="report">신고 사유를 입력해 주세요.</label>
+                        <div class="controls">
+                            <textarea class="form-control" id="report" rows="5"></textarea>
+                        </div>
+                    </div>
+                    <p style="font-size:12px;">
+                        ※ 신고하신 내용은 관리자에게 전달되며, 확인 후 적절한 조치가 이루어집니다. 신고는 익명으로 처리되며, 신고자의 정보는 공개되지 않습니다.
+                    </p>
+                </form>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-default" data-dismiss="modal">Close</button>
+                <button class="btn btn-primary" id="report_btn">전송하기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+    
+
+
+    
+    <a href="/"
+       class="label label-default wikidocs-home"
+       data-toggle="popover"
+       data-placement="left"
+       data-content="위키독스 홈">
+        <span class="glyphicon glyphicon-home"></span>
+    </a>
+    <a class="label label-default dark_btn toggle-theme"
+       data-toggle="popover"
+       data-placement="left"
+       data-content="다크모드">
+        <span class="glyphicon glyphicon-adjust"></span>
+    </a>
+    <a href="#top"
+       class="label label-default back-to-top"
+       data-toggle="popover"
+       data-placement="left"
+       data-content="맨위로">
+        <span class="glyphicon glyphicon-arrow-up"></span>
+    </a>
+
+<!-- 책갈피 모달 -->
+<div class="modal fade"
+     id="bookmarkModal"
+     tabindex="-1"
+     role="dialog"
+     aria-labelledby="bookmarkModalLabel">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+                    <span aria-hidden="true">&times;</span>
+                </button>
+                <h4 class="modal-title" id="bookmarkModalLabel">책갈피</h4>
+            </div>
+            <div class="modal-body bookmark-body">
+                <!-- 여기에 동적 데이터가 로드됩니다 -->
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-primary">추가</button>
+                <button type="button" class="btn btn-default" data-dismiss="modal">닫기</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+        </div>
+        
+
+        <script src="https://ajax.googleapis.com/ajax/libs/jquery/1.12.4/jquery.min.js"></script>
+        <script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.3.7/js/bootstrap.min.js"
+                integrity="sha384-Tc5IQib027qvyjSMfHjOMaLkfuWVxZxUPnCJA7l2mCWNIpG9mGCD8wGNIcPD7Txa"
+                crossorigin="anonymous"></script>
+        <script>
+        const staticFiles = {
+            mainLight: "https://static.wikidocs.net/static/book/css/style_stack.min.css",
+            mainDark: "https://static.wikidocs.net/static/book/css/style_stack_dark.min.css",
+            markdownLight: "https://static.wikidocs.net/static/book/css/markdown_stack.min.css",
+            markdownDark: "https://static.wikidocs.net/static/book/css/markdown_stack_dark.min.css",
+            highlightLight: "//cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.1/styles/default.min.css",
+            highlightDark: "//cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.1/styles/atom-one-dark.min.css"
+        };
+        </script>
+        <script type="text/javascript"
+                src="https://static.wikidocs.net/static/book/js/common.min.js?v=1098"></script>
+        <script type="text/javascript"
+                src="https://static.wikidocs.net/static/book/js/utils.min.js?v=1098"></script>
+        <script type="text/javascript"
+                src="https://static.wikidocs.net/static/book/js/base.min.js?v=1098"></script>
+        
+    
+
+<script type="text/javascript"
+        src="https://static.wikidocs.net/static/apprise/apprise-1.5.min.js?v=1098"></script>
+<script src="//cdnjs.cloudflare.com/ajax/libs/highlight.js/11.5.1/highlight.min.js"></script>
+<script src="https://static.wikidocs.net/static/book/js/page_static.min.js?v=1098"></script>
+<script id="MathJax-script"
+        async
+        src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+
+    
+
+        
+    <script src="https://static.wikidocs.net/static/book/js/toc.min.js?v=1098"></script>
+    <script type="module">
+        import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+        const isDark = document.body.dataset.isDarkmode === 'true';
+        mermaid.initialize({ startOnLoad: false, theme: isDark ? 'dark' : 'default' });
+        let mermaidQueue = Promise.resolve();
+        window.renderWikiDocsMermaid = function(root = document) {
+            root.querySelectorAll('pre code.language-mermaid').forEach((el) => {
+                const pre = el.parentElement;
+                const div = document.createElement('div');
+                div.className = 'mermaid';
+                div.textContent = el.textContent;
+                pre.replaceWith(div);
+            });
+            const nodes = root.querySelectorAll('.mermaid:not([data-processed="true"])');
+            if (!nodes.length) return mermaidQueue;
+            mermaidQueue = mermaidQueue.then(() => mermaid.run({ nodes }));
+            return mermaidQueue;
+        };
+        await window.renderWikiDocsMermaid(document);
+    </script>
+    <script>
+        let wikidocsAdObserver = null;
+        const wikidocsAdScriptPromises = new Map();
+
+        function hideUnfilledAds(root = document) {
+            root.querySelectorAll('ins.adsbygoogle[data-ad-status="unfilled"]').forEach((ad) => {
+                const adWrapper = ad.closest(".dynamic-ad, .ad-wrapper");
+                if (adWrapper) {
+                    adWrapper.style.display = "none";
+                    adWrapper.style.height = "0";
+                    adWrapper.style.minHeight = "0";
+                }
+
+                const slotWrapper = ad.closest(".first-ad, .second-ad");
+                if (slotWrapper) {
+                    slotWrapper.style.display = "none";
+                    slotWrapper.style.height = "0";
+                    slotWrapper.style.minHeight = "0";
+                }
+            });
+
+            root.querySelectorAll(".wikidocs-ad-block").forEach((block) => {
+                const ads = Array.from(block.querySelectorAll("ins.adsbygoogle"));
+                const filledAds = ads.filter((ad) => {
+                    const status = ad.getAttribute("data-ad-status");
+                    return status === "filled" || status === "unfill-optimized";
+                });
+                const pendingAds = ads.filter((ad) => {
+                    return !ad.getAttribute("data-ad-status");
+                });
+                if (ads.length > 0 && filledAds.length === 0 && pendingAds.length === 0) {
+                    block.style.display = "none";
+                }
+            });
+        }
+
+        function loadWikiDocsAdScript(clientId) {
+            if (!clientId || window.adsbygoogle?.loaded) return Promise.resolve();
+            if (wikidocsAdScriptPromises.has(clientId)) {
+                return wikidocsAdScriptPromises.get(clientId);
+            }
+            const scriptUrl = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${encodeURIComponent(clientId)}`;
+            let script = Array.from(document.querySelectorAll("script[src]")).find((candidate) => candidate.src === scriptUrl);
+            const promise = new Promise((resolve) => {
+                if (!script) {
+                    script = document.createElement("script");
+                    script.async = true;
+                    script.src = scriptUrl;
+                    script.crossOrigin = "anonymous";
+                    document.head.appendChild(script);
+                }
+                if (window.adsbygoogle?.loaded) {
+                    resolve();
+                    return;
+                }
+                script.addEventListener("load", resolve, { once: true });
+                script.addEventListener("error", resolve, { once: true });
+                window.setTimeout(resolve, 1500);
+            });
+            wikidocsAdScriptPromises.set(clientId, promise);
+            return promise;
+        }
+
+        window.initWikiDocsAds = function(root = document, registerSlots = false) {
+            const ads = Array.from(root.querySelectorAll("ins.adsbygoogle"));
+            if (!ads.length) return;
+            if (!wikidocsAdObserver) {
+                wikidocsAdObserver = new MutationObserver((mutations) => {
+                    mutations.forEach(() => hideUnfilledAds(document));
+                });
+            }
+            ads.forEach((ad) => {
+                wikidocsAdObserver.observe(ad, {
+                    attributes: true,
+                    attributeFilter: ["data-ad-status"],
+                });
+                if (!registerSlots || ad.dataset.wikidocsAdInitialized === "true" || ad.dataset.adsbygoogleStatus) return;
+                ad.dataset.wikidocsAdInitialized = "true";
+                loadWikiDocsAdScript(ad.dataset.adClient).then(() => {
+                    try {
+                        (window.adsbygoogle = window.adsbygoogle || []).push({});
+                    } catch (error) {
+                        ad.dataset.wikidocsAdInitialized = "false";
+                    }
+                });
+            });
+            hideUnfilledAds(root);
+        };
+
+        document.addEventListener("DOMContentLoaded", () => {
+            window.initWikiDocsAds(document, false);
+        });
+    </script>
+    <script src="https://static.wikidocs.net/static/book/js/page.min.js?v=1098"></script>
+    
+    <script src="https://static.wikidocs.net/static/book/js/reader.min.js?v=1098"></script>
+
+    <script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a439682e5def52f0',t:'MTc5MDgzNjEwMw=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script></body>
+</html>
