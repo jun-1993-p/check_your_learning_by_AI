@@ -1,0 +1,27 @@
+# conda 환경 정의. 만들기: conda env create -f environment.yml
+# 버전은 README의 "검증한 버전"(2026-10-12, Windows 11)과 같다.
+# pytorch·transformers는 sentence-transformers가 끌어오므로 적지 않는다 (PC에 맞는 빌드를 conda가 고른다).
+name: check_your_learning
+channels:
+  - conda-forge
+dependencies:
+  - python=3.13
+  # 기본 (수집·임베딩·답변·퀴즈·평가)
+  - python-dotenv=1.2.2
+  - beautifulsoup4=4.15.0
+  - numpy=2.5.3
+  - sentence-transformers=6.1.0
+  - chromadb=1.5.9
+  - protobuf=6.33.5  # chromadb(opentelemetry-proto)와 충돌 이력이 있어 고정한다
+  - httpx=0.28.1
+  - groq=1.7.0
+  # 시연 GUI (demo/demo_app.py)
+  - streamlit=1.65.0
+  # 시각화 (tools/text_visualize.py, 선택)
+  - matplotlib=3.11.2
+  - pandas=3.0.6
+  - scikit-learn=1.9.1
+  - plotly=7.1.0
+  - umap-learn=0.5.12
+  # 개발 도구
+  - ruff=0.16.8

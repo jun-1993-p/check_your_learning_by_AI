@@ -69,10 +69,22 @@ ANSWER_MAX_TOKENS = 700
 QUIZ_MAX_TOKENS = 700
 # 관련 없는 문단이 근거로 섞이지 않도록 거르는 기준 (코사인 거리, 작을수록 가깝다).
 # 관련 질문 15개와 무관 질문 6개로 재어 정했다: 0.45에서 관련 질문 14개가 근거를 얻고 무관 질문은
-# 전부 걸러진다 (0.5는 무관 질문 3개 통과, 0.6은 5개 통과). 넓은 표현의 질문("변수란 무엇인가",
-# 최고 거리 0.51)은 놓칠 수 있다
+# 전부 걸러진다 (0.5는 무관 질문 3개 통과, 0.6은 5개 통과). 질문 문장으로 검색하던 때 잰 값이라
+# 키워드 검색(question_keywords)으로 바꾼 뒤에는 다시 재야 한다
 MAX_DISTANCE = 0.45  # 이보다 먼 문단은 버린다
 DISTANCE_MARGIN = 0.15  # 1위보다 이만큼 이상 먼 문단은 버린다
+
+# 검색에는 질문 문장 대신 키워드만 넘긴다. 의문사·서술어가 남으면 페이지 관문(text_paragraphs.page_gate)이
+# "06장 … 어떻게 시작해야 할까?", "01장 파이썬이란 무엇인가?" 같은 장 제목에 걸어 무관한 페이지만 남긴다
+QUESTION_WORDS = {
+    "어떻게", "무엇", "무엇인가", "무엇인지", "무엇일까", "뭐", "뭐야", "뭐가", "뭘", "왜",
+    "언제", "어디", "어떤", "무슨", "어느", "얼마나", "어때",
+}  # fmt: skip
+# 서술어: 만들어, 달라, 해요, 순회하려면. 한 글자 한글(해, 써, 법)도 키워드가 못 된다
+VERB_ENDING = re.compile(
+    r"^[가-힣]$|[가-힣](어|아|요|까|니|나|해|돼|라|야|려면|으면|하면)$"
+)
+PARTICLE = re.compile(r"(이란|에서|으로|란|로|은|는|이|가|을|를|의|와|과|에|도|만)$")
 
 # 퀴즈 문단 고르기
 ORIGIN_CITED, ORIGIN_PAGE = "인용한 문단", "같은 페이지의 다른 문단"
@@ -159,6 +171,22 @@ class QuizFormatError(Exception):
 # ---------------------------------------------------------------- 근거 조립
 
 
+def question_keywords(question: str) -> str:
+    """질문에서 키워드만 남긴다. '튜플의 append 메서드는 어떻게 써?' → '튜플 append 메서드'.
+
+    의문사와 서술어(어미로 끝나는 말)를 버리고 조사를 뗀다. 조사는 떼고 남는 말이 두 글자 이상일
+    때만 떼서 '정의', '결과' 같은 단어를 지킨다. 남는 키워드가 없으면 질문을 그대로 쓴다.
+    """
+    keywords = []
+    for word in question.split():
+        word = word.strip("?!.,~")
+        if not word or word in QUESTION_WORDS or VERB_ENDING.search(word):
+            continue
+        stripped = PARTICLE.sub("", word)
+        keywords.append(stripped if len(stripped) >= 2 else word)
+    return " ".join(keywords) or question
+
+
 def filter_hits(hits: list[dict], max_distance: float, margin: float) -> list[dict]:
     """거리순으로 정렬된 문단에서 너무 먼 것을 뺀다."""
     if not hits:
@@ -191,7 +219,9 @@ def retrieve(
     max_distance: float = MAX_DISTANCE,
     margin: float = DISTANCE_MARGIN,
 ) -> list[Source]:
-    hits = filter_hits(index.find(question, book_id), max_distance, margin)[:k]
+    keywords = question_keywords(question)
+    logger.info("검색 키워드: %s", keywords)
+    hits = filter_hits(index.find(keywords, book_id), max_distance, margin)[:k]
     return [
         Source(
             no=no,

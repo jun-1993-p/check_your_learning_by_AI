@@ -1,0 +1,7 @@
+# demo/demo_app.py용 Streamlit 프로젝트 설정 (프로젝트 루트에서 실행할 때 적용된다)
+
+[server]
+# 파일 감시기를 끈다. 감시기가 불러온 모듈을 훑다가 transformers의 지연 import 모듈을 건드려
+# 설치하지 않은 torchvision을 불러오려 해서 "No module named 'torchvision'" 로그가 쌓인다.
+# 끄면 코드 저장 시 자동 새로고침이 안 되니, 코드를 고치면 앱을 다시 실행한다.
+fileWatcherType = "none"

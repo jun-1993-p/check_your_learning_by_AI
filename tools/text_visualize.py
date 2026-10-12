@@ -11,14 +11,14 @@ show/heatmap/similarity의 대상 고르기 (하나만 지정, 없으면 --book-
     --page-id 13     한 페이지의 문단들
     --ids 13-01#b000 13-01#b010   (문단 id = {페이지}-01#b{시작 블록 번호})
 
-사용 예:
-    python text_visualize.py show --ids 13-01#b000 13-01#b010 --n 10
-    python text_visualize.py show --page-id 13 --csv .data/inspect/page13.csv
-    python text_visualize.py heatmap --query "문자열 공백 제거" --open
-    python text_visualize.py heatmap --page-id 13 --sort-dims --dims 64
-    python text_visualize.py similarity --page-id 13 --open
-    python text_visualize.py map --book-id 1 --query "슬라이싱" --open
-    python text_visualize.py map --dim 3 --color book --query "이동평균" --open
+사용 예 (프로젝트 루트에서 -m으로 실행한다):
+    python -m tools.text_visualize show --ids 13-01#b000 13-01#b010 --n 10
+    python -m tools.text_visualize show --page-id 13 --csv .data/inspect/page13.csv
+    python -m tools.text_visualize heatmap --query "문자열 공백 제거" --open
+    python -m tools.text_visualize heatmap --page-id 13 --sort-dims --dims 64
+    python -m tools.text_visualize similarity --page-id 13 --open
+    python -m tools.text_visualize map --book-id 1 --query "슬라이싱" --open
+    python -m tools.text_visualize map --dim 3 --color book --query "이동평균" --open
 """
 
 import argparse

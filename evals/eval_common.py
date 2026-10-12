@@ -6,9 +6,9 @@
 import csv
 from pathlib import Path
 
-from text_ingestion import DATA_ROOT
+from text_ingestion import DATA_ROOT, PROJECT_ROOT
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+# 이 파일은 evals/ 아래에 있으니 경로는 __file__이 아니라 프로젝트 루트(PROJECT_ROOT) 기준으로 잡는다
 CASES_CSV = (
     PROJECT_ROOT / ".idea_folder" / "testcase" / "테스트 케이스.정확도 - 시트1.csv"
 )
@@ -19,6 +19,10 @@ OUT_DIR = DATA_ROOT / "eval"
 # 추론 강도를 낮추고 상한을 넉넉히 잡는다 (Groq 추론 모델 옵션)
 MODEL_OPTIONS = {
     "openai/gpt-oss": {"max_tokens": 800, "reasoning_effort": "low"},
+    # NVIDIA의 추론 모델도 생각 토큰이 max_tokens에 들어가 기본 200이면 잘린다
+    "nvidia/nemotron-3.5-lightning": {"max_tokens": 1500},
+    "meta/muse-glimmer": {"max_tokens": 1500},
+    "z-ai/glm-5.3": {"max_tokens": 1500},
 }
 DEFAULT_MAX_TOKENS = 200  # 분당 출력 토큰 한도(1,000)를 아끼려고 작게 잡는다
 TEMPERATURE = 0.3

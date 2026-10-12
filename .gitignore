@@ -220,6 +220,9 @@ __marimo__/
 # other
 .vscode/
 .idea_folder/
+# 데모 설정(config.toml)만 공유한다. 폴더째(.streamlit/) 빼면 안의 파일을 다시 포함할 수 없다
+.streamlit/*
+!.streamlit/config.toml
 
 # claude
 .claude/

@@ -37,12 +37,12 @@ on이 찾은 근거 URL을 off에 넘긴다.
 결과는 .data/eval/blank_YYYYMMDD_HHMMSS_모델_ctx….csv에 한 줄씩 바로 쓴다 (중간에 끊겨도 남는다).
 LLM 하루 한도에 걸리면 그때까지의 결과만 저장하고, --resume으로 이어 실행한다.
 
-사용 예:
-    python eval_blank.py --dry-run                           # LLM 없이 검색·필터 검사
-    python eval_blank.py --ids 1 16 18                       # 일부 케이스
-    python eval_blank.py --skip-off --ids 1 3 4              # off 없이 on만
-    python eval_blank.py --context on --ids 16               # 페이지 맥락을 줘서 (기본은 off)
-    python eval_blank.py --resume .data/eval/blank_20261007_1200_gpt-oss-20b_ctxoff.csv
+사용 예 (프로젝트 루트에서 -m으로 실행한다. 루트의 quiz_session 등을 import하기 위해서다):
+    python -m evals.eval_blank --dry-run                     # LLM 없이 검색·필터 검사
+    python -m evals.eval_blank --ids 1 16 18                 # 일부 케이스
+    python -m evals.eval_blank --skip-off --ids 1 3 4        # off 없이 on만
+    python -m evals.eval_blank --context on --ids 16         # 페이지 맥락을 줘서 (기본은 off)
+    python -m evals.eval_blank --resume .data/eval/blank_20261007_1200_gpt-oss-20b_ctxoff.csv
 """
 
 import argparse
@@ -61,7 +61,7 @@ import httpx
 from dotenv import load_dotenv
 
 import quiz_session as qs
-from eval_common import (
+from evals.eval_common import (
     CASES_CSV,
     GROQ_MAX_RETRIES,
     MAX_API_ERRORS,
@@ -872,7 +872,7 @@ def main() -> None:
             why = "하루 한도로 중단. 한도가 풀리면 이어서 실행하세요"
         print(
             f"\n{why}:\n"
-            f"  python eval_blank.py --resume {out} --model {llm_model} "
+            f"  python -m evals.eval_blank --resume {out} --model {llm_model} "
             f"--context {args.context}"
             + (" --skip-off" if args.skip_off else "")
             + (f" --ids {' '.join(args.ids)}" if args.ids else "")
