@@ -1,6 +1,6 @@
 """질문에 답하고 바로 확인 퀴즈를 낸다: 문단 검색 → 답변 → 문단마다 문제 하나씩 → 풀이.
 
-흐름 (LLM은 llm_groq.py 또는 llm_nvidia.py. .env의 LLM_PROVIDER로 고른다):
+흐름 (LLM은 llm_groq.py, llm_nvidia.py, llm_ollama.py 중 하나. .env의 LLM_PROVIDER로 고른다):
     1. 질문과 가까운 A+ 문단을 찾는다 (text_paragraphs.ParagraphIndex).
     2. 문단에만 근거해 답하고, 답변이 인용한 문단을 고른다.
     3. 퀴즈는 모든 유형(O/X, 빈칸, 4지선다, 단답형)을 같은 방식으로 만든다: 문단 하나를 주고
@@ -14,11 +14,12 @@
 퀴즈 유형별 스키마·검증·채점은 quiz_templates.py에 있다.
 
 .env:
-    LLM_PROVIDER=groq   # groq(기본) 또는 nvidia. 바꾸려면 이 값만 고친다
+    LLM_PROVIDER=groq   # groq(기본), nvidia, ollama 중 하나. 바꾸려면 이 값만 고친다
     GROQ_API_KEY=...
     GROQ_MODEL=...      # LLM_PROVIDER=groq일 때 필수
     NVIDIA_API_KEY=...
     NVIDIA_MODEL=...    # LLM_PROVIDER=nvidia일 때 필수 (그 밖의 선택 항목은 llm_nvidia.py 참고)
+    OLLAMA_MODEL=...    # LLM_PROVIDER=ollama일 때 필수 (로컬 실행, 키 없음. 선택 항목은 llm_ollama.py 참고)
 
 사용 예:
     python quiz_session.py "문자열 공백 제거는 어떻게 해?"
@@ -44,9 +45,9 @@ import quiz_templates as qt
 from text_embed import load_chunk_index, load_model
 from text_paragraphs import ParagraphIndex, get_collection
 
-# LLM 호출 파일. 둘은 같은 이름·인터페이스를 가져서 .env의 LLM_PROVIDER만 바꾸면 갈아 끼운다.
+# LLM 호출 파일. 셋은 같은 이름·인터페이스를 가져서 .env의 LLM_PROVIDER만 바꾸면 갈아 끼운다.
 # 이 모듈을 불러오는 쪽(eval_blank.py 등)이 main보다 먼저 쓰므로 여기서 .env를 읽는다
-LLM_PROVIDERS = {"groq": "llm_groq", "nvidia": "llm_nvidia"}
+LLM_PROVIDERS = {"groq": "llm_groq", "nvidia": "llm_nvidia", "ollama": "llm_ollama"}
 load_dotenv(override=True)
 _provider = os.getenv("LLM_PROVIDER", "groq").strip().lower()
 if _provider not in LLM_PROVIDERS:
