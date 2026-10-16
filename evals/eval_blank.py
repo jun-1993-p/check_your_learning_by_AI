@@ -94,7 +94,23 @@ LATIN_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 PYTHON_NAMES = set(keyword.kwlist) | set(dir(builtins))
 # 기본 자료형의 메서드 이름 (is_integer, bit_length 등). 밑줄이 있어도 예제용 이름이 아니다
 API_NAMES = set().union(
-    *(dir(t) for t in (str, bytes, list, tuple, dict, set, frozenset, int, float, complex, bool, object))
+    *(
+        dir(t)
+        for t in (
+            str,
+            bytes,
+            list,
+            tuple,
+            dict,
+            set,
+            frozenset,
+            int,
+            float,
+            complex,
+            bool,
+            object,
+        )
+    )
 )
 MIN_HANGUL_CHARS = 5  # 문제 문장에 이 이상 한글이 있어야 한국어 문제로 본다
 
@@ -341,7 +357,9 @@ def check_korean_term(answer: str, unit_text: str) -> None:
     if re.search(rf"[가-힣]\s*\(\s*{re.escape(answer)}\s*\)", unit_text, re.IGNORECASE):
         raise BlankError(f"한글 용어가 있는데 영어 정답: {answer}")
     prose = FENCED_CODE.sub("", unit_text)
-    if not re.search(rf"(?<![A-Za-z0-9_]){re.escape(answer)}(?![A-Za-z0-9_])", prose, re.IGNORECASE):
+    if not re.search(
+        rf"(?<![A-Za-z0-9_]){re.escape(answer)}(?![A-Za-z0-9_])", prose, re.IGNORECASE
+    ):
         raise BlankError(f"영어 정답이 코드에만 있음: {answer}")
 
 
@@ -357,7 +375,9 @@ def check_defined_names(question: str, answer: str, unit_text: str) -> None:
     # 문단 설명에서만 정의된 예제용 이름(num_accounts 같은 snake_case)은 코드 블록 밖에 있어도 안 된다
     for name in set(LATIN_NAME.findall(question)) - PYTHON_NAMES - API_NAMES:
         if "_" in name.strip("_") and not name.startswith("__"):
-            raise BlankError(f"예제용 이름이 문제에 나옴: {name} (학습자는 그 예제를 못 봄)")
+            raise BlankError(
+                f"예제용 이름이 문제에 나옴: {name} (학습자는 그 예제를 못 봄)"
+            )
 
 
 def validate_paragraph(out: dict, unit_text: str) -> str:
@@ -567,9 +587,7 @@ def run_on(
         if passed:
             _, _, rank, unit, out, question = min(passed, key=lambda p: p[:3])
             used.add(unit["unit_id"])
-            logger.info(
-                "[%s/on] 통과 %d개 중 %d위 선택", case["id"], len(passed), rank
-            )
+            logger.info("[%s/on] 통과 %d개 중 %d위 선택", case["id"], len(passed), rank)
             return {
                 **result,
                 "status": MADE,
@@ -743,7 +761,9 @@ def main() -> None:
         help="문제만 읽고 푸는 검증 LLM. 생략하면 문제 생성 모델과 같다",
     )
     parser.add_argument(
-        "--model", default=None, help="문제 생성 LLM 모델 ID. 생략하면 .env의 모델(GROQ_MODEL 또는 NVIDIA_MODEL)"
+        "--model",
+        default=None,
+        help="문제 생성 LLM 모델 ID. 생략하면 .env의 모델(GROQ_MODEL 또는 NVIDIA_MODEL)",
     )
     parser.add_argument(
         "--resume",
@@ -865,7 +885,11 @@ def main() -> None:
 
     if stop_reason:
         if isinstance(stop_reason, ApiErrorsPiledUp):
-            logger.error("API 오류가 %d번 연속 나서 중단했습니다: %s", MAX_API_ERRORS, stop_reason)
+            logger.error(
+                "API 오류가 %d번 연속 나서 중단했습니다: %s",
+                MAX_API_ERRORS,
+                stop_reason,
+            )
             why = ".env의 모델·API 키와 서비스 상태를 확인한 뒤 이어서 실행하세요"
         else:
             logger.error("하루 한도에 걸려 중단했습니다: %s", stop_reason)
