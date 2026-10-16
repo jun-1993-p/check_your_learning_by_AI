@@ -74,7 +74,7 @@ from evals.eval_common import (
     parse_book_id,
     titles_by_book_id,
 )
-from quiz_templates import BLANK, BlankError, contains, make_question
+from quiz_templates import BLANK, BLANK_RULE, BlankError, contains, make_question
 from text_embed import embed, load_chunk_index, load_model
 from text_paragraphs import ParagraphIndex, get_collection
 
@@ -94,7 +94,23 @@ LATIN_NAME = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 PYTHON_NAMES = set(keyword.kwlist) | set(dir(builtins))
 # 기본 자료형의 메서드 이름 (is_integer, bit_length 등). 밑줄이 있어도 예제용 이름이 아니다
 API_NAMES = set().union(
-    *(dir(t) for t in (str, bytes, list, tuple, dict, set, frozenset, int, float, complex, bool, object))
+    *(
+        dir(t)
+        for t in (
+            str,
+            bytes,
+            list,
+            tuple,
+            dict,
+            set,
+            frozenset,
+            int,
+            float,
+            complex,
+            bool,
+            object,
+        )
+    )
 )
 MIN_HANGUL_CHARS = 5  # 문제 문장에 이 이상 한글이 있어야 한국어 문제로 본다
 
@@ -144,8 +160,8 @@ PARAGRAPH_SYSTEM = f"""너는 파이썬 학습 퀴즈 출제자야.
 - [핵심 문단]이 1순위 근거야. 문제 내용과 정답은 반드시 [핵심 문단]에 있는 내용이어야 하고, 문단 밖 지식은 쓰지 마.
 - [같은 페이지]는 2순위 참고 자료야. 그 안의 {"<<핵심 문단>>"} 자리가 [핵심 문단]이야. 정의·예제 이름·앞뒤 코드를 이해하는 데만 쓰고, 정답이나 문제 내용을 여기에서만 가져오지 마. [같은 페이지]가 없으면 무시해.
 - question: 학습자가 [핵심 문단]을 보지 않고도 이해할 수 있는 자기완결적인 한 문장. 반드시 한국어로 써 (영어 문장 금지, 코드 이름만 영어 가능).문단의 문장을 그대로 베끼지 말고 직접 써. 문단 안에서 정의되지 않은 변수·값 이름은 쓰지 마. 접속어로 시작하지 마.
-  정답이 들어갈 자리는 "{BLANK}"로 쓰고, 같은 단어가 여러 번 나오면 모두 "{BLANK}"로 가려.
-- answer: {BLANK}에 들어갈 파이썬 개념 용어(조사 제외). 문단에 '변수(variable)'처럼 한글 용어가 있으면 한글로 쓰고, 영어는 while·and·len처럼 코드에 쓰는 이름일 때만 써. 코드의 실행 결과나 값을 묻는 문제는 만들지 마. '수정할 수 없다'처럼 서술어 전체를 정답으로 하지 말고 핵심 용어(수정)만 빈칸으로 만들어서 나머지는 문제에 남겨. 반드시 띄어쓰기 없는 한 단어여야 하고, 구나 문장은 안 돼. [핵심 문단]에도 나와야 하고, question의 다른 곳에는 남아 있으면 안 돼.
+  {BLANK_RULE}
+- answer: {BLANK}에 들어갈 파이썬 개념 용어(조사 제외). 문단에 '변수(variable)'처럼 한글 용어가 있으면 한글로 쓰고, 영어는 while·and·len처럼 코드에 쓰는 이름일 때만 써. 코드의 실행 결과나 값을 묻는 문제는 만들지 마. '수정할 수 없다'처럼 서술어 전체를 정답으로 하지 말고 핵심 용어(수정)만 빈칸으로 만들어서 나머지는 문제에 남겨. 반드시 띄어쓰기 없는 한 단어여야 하고, 구나 문장은 안 돼. [핵심 문단]에도 나와야 해.
 - source: 문제 내용의 근거가 [핵심 문단]이면 "{SOURCE_PARAGRAPH}", [같은 페이지]에서만 나오면 "{SOURCE_PAGE}".
 거부 사유 (문제를 낼 수 없을 때 하나 골라):
 - 정보 없음: 문단이 도입·예고·안내·잡담·감정·책 이야기뿐
@@ -158,7 +174,7 @@ JSON 객체 하나만 출력해."""
 OFF_SYSTEM = f"""너는 파이썬 학습 퀴즈 출제자야.
 학습자가 아래 [책]의 [페이지 URL]에 있는 페이지에서 아래 [개념]을 공부했어. 그 페이지의 내용에 기반한 빈칸 채우기 문제의 문장 하나를 새로 써 줘.
 - 너는 웹을 볼 수 없고 페이지 본문도 받지 못했어. 책 내용을 기억하는 대로 써.
-- question: 개념을 확인하는 한 문장. 반드시 한국어로 써 (영어 문장 금지, 코드 이름만 영어 가능). 정답이 들어갈 자리는 "{BLANK}"로 쓰고, 같은 단어가 여러 번 나오면 모두 "{BLANK}"로 가려.
+- question: 개념을 확인하는 한 문장. 반드시 한국어로 써 (영어 문장 금지, 코드 이름만 영어 가능). {BLANK_RULE}
 - answer: {BLANK}에 들어갈 파이썬 개념 용어(조사 제외). 반드시 띄어쓰기 없는 한 단어여야 하고, 구나 문장은 안 돼.
 - 그 페이지의 내용이 기억나지 않아 문제를 낼 수 없으면 거부해. 거부 사유(하나 골라): 정보 없음 / 비유 / 다른 언어 / 추상적 주장 / 개념 불일치.
 출제하면 reject_reason은 "{OK_REASON}", 거부하면 question·answer는 빈 문자열.
@@ -341,7 +357,9 @@ def check_korean_term(answer: str, unit_text: str) -> None:
     if re.search(rf"[가-힣]\s*\(\s*{re.escape(answer)}\s*\)", unit_text, re.IGNORECASE):
         raise BlankError(f"한글 용어가 있는데 영어 정답: {answer}")
     prose = FENCED_CODE.sub("", unit_text)
-    if not re.search(rf"(?<![A-Za-z0-9_]){re.escape(answer)}(?![A-Za-z0-9_])", prose, re.IGNORECASE):
+    if not re.search(
+        rf"(?<![A-Za-z0-9_]){re.escape(answer)}(?![A-Za-z0-9_])", prose, re.IGNORECASE
+    ):
         raise BlankError(f"영어 정답이 코드에만 있음: {answer}")
 
 
@@ -357,7 +375,9 @@ def check_defined_names(question: str, answer: str, unit_text: str) -> None:
     # 문단 설명에서만 정의된 예제용 이름(num_accounts 같은 snake_case)은 코드 블록 밖에 있어도 안 된다
     for name in set(LATIN_NAME.findall(question)) - PYTHON_NAMES - API_NAMES:
         if "_" in name.strip("_") and not name.startswith("__"):
-            raise BlankError(f"예제용 이름이 문제에 나옴: {name} (학습자는 그 예제를 못 봄)")
+            raise BlankError(
+                f"예제용 이름이 문제에 나옴: {name} (학습자는 그 예제를 못 봄)"
+            )
 
 
 def validate_paragraph(out: dict, unit_text: str) -> str:
@@ -567,9 +587,7 @@ def run_on(
         if passed:
             _, _, rank, unit, out, question = min(passed, key=lambda p: p[:3])
             used.add(unit["unit_id"])
-            logger.info(
-                "[%s/on] 통과 %d개 중 %d위 선택", case["id"], len(passed), rank
-            )
+            logger.info("[%s/on] 통과 %d개 중 %d위 선택", case["id"], len(passed), rank)
             return {
                 **result,
                 "status": MADE,
@@ -743,7 +761,9 @@ def main() -> None:
         help="문제만 읽고 푸는 검증 LLM. 생략하면 문제 생성 모델과 같다",
     )
     parser.add_argument(
-        "--model", default=None, help="문제 생성 LLM 모델 ID. 생략하면 .env의 모델(GROQ_MODEL 또는 NVIDIA_MODEL)"
+        "--model",
+        default=None,
+        help="문제 생성 LLM 모델 ID. 생략하면 .env의 모델(GROQ_MODEL 또는 NVIDIA_MODEL)",
     )
     parser.add_argument(
         "--resume",
@@ -865,7 +885,11 @@ def main() -> None:
 
     if stop_reason:
         if isinstance(stop_reason, ApiErrorsPiledUp):
-            logger.error("API 오류가 %d번 연속 나서 중단했습니다: %s", MAX_API_ERRORS, stop_reason)
+            logger.error(
+                "API 오류가 %d번 연속 나서 중단했습니다: %s",
+                MAX_API_ERRORS,
+                stop_reason,
+            )
             why = ".env의 모델·API 키와 서비스 상태를 확인한 뒤 이어서 실행하세요"
         else:
             logger.error("하루 한도에 걸려 중단했습니다: %s", stop_reason)
