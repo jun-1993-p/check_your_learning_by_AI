@@ -49,10 +49,21 @@ class MakeQuestionTest(unittest.TestCase):
         self.assertEqual(count, 1)
 
     def test_파이썬_이름의_밑줄은_빈칸이_아니다(self):
-        text = "__init__ 메서드는 my_name 같은 ____ 변수를 만든다."
+        text = "__init__ 메서드는 snake_case 이름의 ____ 변수를 만든다."
         question, count = make_question(text, "인스턴스")
         self.assertEqual(question, text)
         self.assertEqual(count, 1)
+
+    def test_이름_안에_이어진_밑줄_세_개_이상도_빈칸이_아니다(self):
+        for text in (
+            "___private 변수는 ____ 로 표시한다.",
+            "a___b 는 ____ 이다.",
+            "__init___ 는 ____ 이다.",
+        ):
+            with self.subTest(text=text):
+                question, count = make_question(text, "관례")
+                self.assertEqual(question, text)
+                self.assertEqual(count, 1)
 
 
 if __name__ == "__main__":

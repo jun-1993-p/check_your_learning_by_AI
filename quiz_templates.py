@@ -24,8 +24,9 @@ OK_REASON = "없음"
 REJECT_REASONS = ("정보 없음", "비유", "다른 언어", "추상적 주장", "개념 불일치")
 
 BLANK = "____"
-# LLM이 쓴 밑줄 덩어리는 길이와 관계없이 빈칸 하나다. 파이썬 이름(__init__)의 밑줄은 2개까지라 겹치지 않는다
-UNDERSCORE_RUN = re.compile(r"_{3,}")
+# LLM이 빈칸으로 쓴 밑줄 덩어리(3개 이상). 길이와 관계없이 빈칸 하나로 본다.
+# 앞뒤에 영문자·숫자가 붙은 밑줄(a___b, ___private, __init___)은 이름의 일부라 제외한다
+LLM_BLANK = re.compile(r"(?<![A-Za-z0-9])_{3,}(?![A-Za-z0-9])")
 MAX_ANSWER_CHARS = 30
 MIN_EVIDENCE_CHARS = 8  # 근거 인용이 이보다 짧으면 아무 데나 들어맞는다
 
@@ -67,7 +68,7 @@ def make_question(text: str, answer: str) -> tuple[str, int]:
     ____가 없으면 문장에서 정답을 찾아 직접 가린다 (blank_out).
     """
     answer = answer.strip()
-    text = UNDERSCORE_RUN.sub(BLANK, text)
+    text = LLM_BLANK.sub(BLANK, text)
     if BLANK not in text:
         return blank_out(text, answer)
     if not answer:

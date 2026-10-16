@@ -281,6 +281,8 @@ python -m evals.eval_blank --resume .data/eval/<결과>.csv  # 중단된 실행 
 │   └── demo_app.py
 ├── tools/                # 점검 도구 (python -m tools.text_visualize)
 │   └── text_visualize.py #   벡터 확인 (show / heatmap / similarity / map)
+├── tests/                # 단위 테스트 (python -m unittest, LLM 불필요)
+│   └── test_quiz_templates.py #   빈칸 문제 만들기
 ├── environment.yml       # conda 환경 정의 (검증한 버전)
 ├── .streamlit/
 │   └── config.toml       # 데모용 Streamlit 설정 (파일 감시기 끄기)
@@ -327,6 +329,7 @@ python -m evals.eval_blank --resume .data/eval/<결과>.csv  # 중단된 실행 
 ```bash
 ruff check
 ruff format
+python -m unittest        # 단위 테스트 (LLM·벡터 저장소 없이 돈다)
 ```
 
 예외 처리는 구체적인 예외 타입을 지정하며(bare `except:` 금지), 환경 변수는 `python-dotenv`로 읽습니다.
@@ -336,4 +339,4 @@ ruff format
 - 현재 수집 대상은 위키독스 책입니다(`wikidocs.net`).
 - 코드 출제는 보류 상태입니다. 정확도 평가에서는 코드가 포함된 문단을 적합성 관문에서 제외하고(`EXCLUDE_CODE = True`), 앱 퀴즈는 코드가 있던 문단도 쓰되 LLM에는 코드를 뺀 본문만 전달합니다.
 - NVIDIA 공급자의 엔드포인트·구조화 출력·일일 한도 판정은 공식 문서로 검증하지 않은 일반적인 OpenAI 호환 방식 기준입니다.
-- 별도의 테스트 스위트는 아직 없습니다. 품질 검증은 `evals/eval_blank.py`로 수행합니다.
+- 단위 테스트(`tests/`)는 빈칸 문제 만들기만 다룹니다. 출제 품질 검증은 `evals/eval_blank.py`로 수행합니다.
