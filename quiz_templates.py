@@ -27,6 +27,11 @@ BLANK = "____"
 # LLM이 빈칸으로 쓴 밑줄 덩어리(3개 이상). 길이와 관계없이 빈칸 하나로 본다.
 # 앞뒤에 영문자·숫자가 붙은 밑줄(a___b, ___private, __init___)은 이름의 일부라 제외한다
 LLM_BLANK = re.compile(r"(?<![A-Za-z0-9])_{3,}(?![A-Za-z0-9])")
+# 빈칸 문제를 쓰는 LLM 프롬프트(앱·평가)가 함께 쓰는 지시. make_question의 거절 규칙과 짝이다
+BLANK_RULE = (
+    f'정답이 들어갈 자리 하나만 "{BLANK}"로 써 (빈칸은 하나). '
+    "같은 단어가 또 나오면 그대로 둬 (함께 가려진다)."
+)
 MAX_ANSWER_CHARS = 30
 MIN_EVIDENCE_CHARS = 8  # 근거 인용이 이보다 짧으면 아무 데나 들어맞는다
 
@@ -64,7 +69,8 @@ def answer_pattern(answer: str) -> re.Pattern:
 def make_question(text: str, answer: str) -> tuple[str, int]:
     """LLM이 쓴 문장으로 (빈칸 문제, 빈칸 수). 이미 ____로 비워 왔으면 그대로 쓰되 남은 정답도 가린다.
 
-    밑줄 덩어리(___, ________)는 먼저 ____ 하나로 바꾼다.
+    밑줄 덩어리(___, ________)는 먼저 ____ 하나로 바꾼다. 그래도 ____가 2개 이상이면 BlankError
+    (빈칸마다 무엇을 쓸지 알 수 없다. 같은 단어가 여러 번 나오는 경우는 LLM이 하나만 비우면 코드가 나머지를 가린다).
     ____가 없으면 문장에서 정답을 찾아 직접 가린다 (blank_out).
     """
     answer = answer.strip()
@@ -77,7 +83,7 @@ def make_question(text: str, answer: str) -> tuple[str, int]:
         raise BlankError(f"정답이 너무 김({len(answer)}자)")
     # 빈칸마다 무엇을 쓸지 알 수 없다. 같은 단어의 다른 자리는 아래에서 코드가 가린다
     if (written := text.count(BLANK)) > 1:
-        raise BlankError(f"LLM이 쓴 빈칸이 {written}개")
+        raise BlankError(f"LLM이 쓴 빈칸이 {written}개, 빈칸은 하나만 쓸 것")
     question = answer_pattern(answer).sub(BLANK, text)  # 같은 단어가 남아 있으면 가린다
     if question.replace(BLANK, "").strip() == "":
         raise BlankError("문제에 빈칸 말고 내용이 없음")
@@ -164,9 +170,8 @@ FORMAT_GUIDE = {
         "거짓 진술은 [문단]의 맞는 문장에서 한 곳만 바꿔 만들어 (예: 왼쪽→오른쪽)."
     ),
     "blank": (
-        f'빈칸 채우기: question은 [문단]에 근거해 새로 쓴 한 문장이고, 정답 자리 하나만 "{BLANK}"로 써 (빈칸은 하나). '
-        "answer는 [문단]에도 나오는 파이썬 개념 용어(조사 제외)이고, "
-        "question의 다른 곳에 같은 단어가 또 나오면 그대로 둬 (함께 가려진다). "
+        f"빈칸 채우기: question은 [문단]에 근거해 새로 쓴 한 문장이야. {BLANK_RULE} "
+        "answer는 [문단]에도 나오는 파이썬 개념 용어(조사 제외)야. "
         "accepted에는 answer를 포함해 정답으로 인정할 다른 표기를 넣어."
     ),
     "mcq": (

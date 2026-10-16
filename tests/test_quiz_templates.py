@@ -69,11 +69,11 @@ class MakeQuestionTest(unittest.TestCase):
 
     def test_LLM이_빈칸을_여러_개_쓰면_오류(self):
         text = "딕셔너리 ____에서 '____'의 Value를 얻기 위해 ____['____']을 사용한다."
-        with self.assertRaisesRegex(BlankError, "4"):
+        with self.assertRaisesRegex(BlankError, "빈칸이 4개.*빈칸은 하나만"):
             make_question(text, "a")
 
     def test_긴_밑줄_두_덩어리도_빈칸_두_개라_오류(self):
-        with self.assertRaisesRegex(BlankError, "2"):
+        with self.assertRaisesRegex(BlankError, "빈칸이 2개.*빈칸은 하나만"):
             make_question("________ 함수는 공백을 ______.", "strip")
 
 
