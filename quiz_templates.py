@@ -75,6 +75,9 @@ def make_question(text: str, answer: str) -> tuple[str, int]:
         raise BlankError("정답이 비어 있음")
     if len(answer) > MAX_ANSWER_CHARS:
         raise BlankError(f"정답이 너무 김({len(answer)}자)")
+    # 빈칸마다 무엇을 쓸지 알 수 없다. 같은 단어의 다른 자리는 아래에서 코드가 가린다
+    if (written := text.count(BLANK)) > 1:
+        raise BlankError(f"LLM이 쓴 빈칸이 {written}개")
     question = answer_pattern(answer).sub(BLANK, text)  # 같은 단어가 남아 있으면 가린다
     if question.replace(BLANK, "").strip() == "":
         raise BlankError("문제에 빈칸 말고 내용이 없음")
@@ -161,9 +164,9 @@ FORMAT_GUIDE = {
         "거짓 진술은 [문단]의 맞는 문장에서 한 곳만 바꿔 만들어 (예: 왼쪽→오른쪽)."
     ),
     "blank": (
-        f'빈칸 채우기: question은 [문단]에 근거해 새로 쓴 한 문장이고, 정답 자리는 "{BLANK}"로 써. '
-        f'같은 단어가 여러 번 나오면 모두 "{BLANK}"로 가려. '
-        "answer는 [문단]에도 나오는 파이썬 개념 용어(조사 제외)이고, question의 다른 곳에는 남아 있으면 안 돼. "
+        f'빈칸 채우기: question은 [문단]에 근거해 새로 쓴 한 문장이고, 정답 자리 하나만 "{BLANK}"로 써 (빈칸은 하나). '
+        "answer는 [문단]에도 나오는 파이썬 개념 용어(조사 제외)이고, "
+        "question의 다른 곳에 같은 단어가 또 나오면 그대로 둬 (함께 가려진다). "
         "accepted에는 answer를 포함해 정답으로 인정할 다른 표기를 넣어."
     ),
     "mcq": (
